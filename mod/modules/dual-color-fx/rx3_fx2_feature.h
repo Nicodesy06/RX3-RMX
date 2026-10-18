@@ -207,9 +207,13 @@ static int fx2_allocate(void)
     for (unsigned int n = 0; n < 4u; n++) {
         void *block = mmap(0, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (block == MAP_FAILED) {
-            framework->memory->abandon(&fx2_enabled, bytes * (4u - n));
-            fx2_delay_count = n;
-            fx2_free_memory();
+            /* Nothing was settled yet: the whole reservation is abandoned. */
+            for (unsigned int j = 0; j < n; j++) {
+                munmap(fx2_delay[j >> 1][j & 1u], bytes);
+                fx2_delay[j >> 1][j & 1u] = 0;
+            }
+            framework->memory->abandon(&fx2_enabled, bytes * 4u);
+            fx2_delay_count = 0u;
             log_line("fx2: delay allocation failed; COLOR 2 stays off");
             return 0;
         }

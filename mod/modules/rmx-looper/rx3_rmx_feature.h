@@ -468,9 +468,10 @@ static int rmx_allocate(unsigned int capacity)
     for (unsigned int i = 0; i < count; i++) {
         void *block = mmap(0, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (block == MAP_FAILED) {
-            framework->memory->abandon(&rmx_enabled, bytes * (count - i));
-            rmx_buffer_count = i;
-            rmx_free_buffers();
+            /* Nothing was settled yet: the whole reservation is abandoned. */
+            for (unsigned int j = 0; j < i; j++) { munmap(rmx_buffers[j], bytes); rmx_buffers[j] = 0; }
+            framework->memory->abandon(&rmx_enabled, bytes * count);
+            rmx_buffer_count = 0u;
             log_line("rmx: buffer allocation failed; ROLL / LOOP stays off");
             return 0;
         }
