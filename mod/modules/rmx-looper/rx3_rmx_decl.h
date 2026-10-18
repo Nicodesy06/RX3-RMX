@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MPL-2.0
- * ROLL / LOOP FX: declarations and shared state, private to rx3_rmx_module.c.
+ * RMX X-PAD: declarations and shared state, private to rx3_rmx_module.c.
  *
  * Threads that touch this state, and what each may do:
  *   audio   the deck streams and the master bus: engines only, no I/O

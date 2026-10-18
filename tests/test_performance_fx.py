@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MPL-2.0
-"""ROLL / LOOP FX and COLOR 2, run offline against mock services.
+"""RMX X-PAD, COLOR 2 and ISOLATOR, run offline against mock services.
 
 These drive the modules through the same callbacks the core gives them --
 pads, keys, the touch row, the deck streams and the master bus -- and measure

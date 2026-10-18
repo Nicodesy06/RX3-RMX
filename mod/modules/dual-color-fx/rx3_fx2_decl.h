@@ -13,7 +13,7 @@
 #define FX2_PRIORITY 60u               /* after Stems (50) and the roll (55) */
 
 /* The deck's BPM in hundredths, for the echo time and the gate. The same
-   accessor ROLL / LOOP and Now Playing read; its prologue is checked first,
+   accessor the RMX X-PAD and Now Playing read; its prologue is checked first,
    and a value outside 40..300 BPM leaves the engines at their last tempo. */
 #define FX2_PLAY_BPM ((unsigned long)0x000fd1fc)
 static const uint8_t fx2_play_bpm_guard[8] = {
