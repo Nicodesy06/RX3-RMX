@@ -3,6 +3,10 @@
 
 ## Unreleased
 
+- **RX3-RMX fork.** Add **COLOR 2** (`dual-color-fx`): a second Sound Color FX per channel (FILTER, DUB ECHO, SPACE, CRUSH, NOISE, SWEEP) in software, in series before the mixer's own, with its own COLOR and PARAMETER per effect, tails that ring out across a change, an input probe for the Color FX buttons and an optional SHIFT + button map read from the drive. Add **ROLL / LOOP FX** (`rmx-looper`): RMX-style rolls from 1/16 to 8 beats on the pads at the deck's BPM with HOLD, on either deck or the master bus, and a live loop on its own bus from CH1, CH2 or MST with OVERDUB layers, undo and clear. ARM build and host tests only; **not yet run on hardware**. See [RMX-FX.md](RMX-FX.md).
+
+- Core API 19: each audio stage chains up to four clients by priority, so Samples and Stems coexist with other audio modules; the unit-wide pad light refresh is shared; a panel can name its own tab pictures, with eight new tab slots and the private image bound raised to 0x16b5. Header-only effect kernels join the public API. Host tests only.
+
 - The third BROWSE column reads less from the USB drive: only the value it shows (BPM, duration, artist or key), instead of the artist and key for every track. Emulator measurement: about 70% less work per track, identical display. First RX3 test with a 980-track USB drive: scrolling clearly faster.
 
 - Stem preparation installs again on Intel Macs ([#21](https://github.com/Tratosca/rx3-toolkit/issues/21)). PyTorch no longer publishes Intel builds, so the app installs the last versions that have them, with Python 3.10 to 3.12; 3.11 and 3.12 need the Xcode Command Line Tools. Checked under Rosetta with vocals, 3-part and every preset; not yet run on a real Intel Mac.

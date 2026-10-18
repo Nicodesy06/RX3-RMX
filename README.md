@@ -23,6 +23,9 @@
   <a href="#documentation">Docs</a>
 </p>
 
+> [!NOTE]
+> **This is RX3-RMX**, a fork of [rx3-toolkit](https://github.com/Tratosca/rx3-toolkit) that adds **COLOR 2** (a second Sound Color FX per channel) and **ROLL / LOOP FX** (RMX-style roll, HOLD and a live looper with OVERDUB on its own bus). Both are compiled and tested offline only and **have not run on an RX3 yet**. Read [RMX-FX.md](RMX-FX.md) (Italian) for the feasibility study, architecture and hardware test plan, and the guides for [COLOR 2](mod/modules/dual-color-fx/README.md) and [ROLL / LOOP FX](mod/modules/rmx-looper/README.md). Everything below is upstream's README.
+
 > [!IMPORTANT]
 > This README describes the **current development version**. The latest [public release](../../releases), **v0.5.2**, is older and does not contain every feature below. Check the release notes for what your download actually includes. Several newer modules have passed local or emulator checks but still need a complete test on a physical RX3.
 
