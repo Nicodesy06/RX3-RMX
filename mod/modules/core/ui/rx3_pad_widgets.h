@@ -22,6 +22,8 @@ static volatile int pad_press_widget = -1;
 static volatile int pad_press_part = -1;
 static volatile unsigned int pad_press_inside;
 static volatile unsigned int pad_drag_active;
+/* A finger on an X-PAD strip, and the strip widget it last reported. */
+static volatile unsigned int pad_strip_active;
 static unsigned int pad_press_passive;
 static int pad_drag_last_x;
 static int pad_press_x, pad_press_value_x;
@@ -34,6 +36,7 @@ static unsigned int pad_widget_kind(const struct rx3_pad_row *row,
     unsigned int kind = row->kind ? row->kind(deck,widget) : row->widgets[widget].kind;
     if ((kind == RX3_PAD_SLIDER || kind == RX3_PAD_TOGGLE_SLIDER) &&
         (!row->slider_get || !row->slider_set)) return RX3_PAD_STATUS;
+    if (kind == RX3_PAD_STRIP) return row->strip ? kind : RX3_PAD_STATUS;
     return kind <= RX3_PAD_OUTLINE_BUTTON ? kind : RX3_PAD_STATUS;
 }
 static uint32_t pad_colour_rgb888(unsigned int rgb)
@@ -381,6 +384,7 @@ static void pad_row_clear_press(void)
     pad_press_part = -1;
     pad_press_inside = 0u;
     pad_drag_active = 0u;
+    pad_strip_active = 0u;
     pad_press_passive = 0u;
 }
 
@@ -463,6 +467,13 @@ static int pad_row_touch(const struct rx3_pad_row *row, unsigned int deck,
         pad_press_inside = 1u;
         pad_press_passive = pad_widget_kind(row,deck,widget) == RX3_PAD_STATUS;
         if (pad_press_passive) return 1;
+        if (pad_widget_kind(row,deck,widget) == RX3_PAD_STRIP) {
+            /* The strip acts on contact, like the RMX's: no wait for release. */
+            pad_strip_active = 1u;
+            row->strip(deck, widget, 1u);
+            pad_row_invalidate();
+            return 1;
+        }
         if (pad_widget_kind(row,deck,widget) == RX3_PAD_SLIDER) {
             /* Tapping the track is the first event of a drag, not a case of
                its own: the value follows the finger from the moment it lands. */
@@ -483,6 +494,24 @@ static int pad_row_touch(const struct rx3_pad_row *row, unsigned int deck,
             (unsigned int)pad_press_widget) == RX3_PAD_STATUS) {
         pad_press_passive=1u;
         if (phase != 2u) pad_row_clear_press();
+        return 1;
+    }
+    if (pad_strip_active) {
+        if (phase == 2u) {
+            /* Sliding onto another section of the strip moves the effect
+               there; anywhere else, the last section holds. */
+            if (pad_row_locate(row, deck, screen_x, &widget, &part) &&
+                (int)widget != pad_press_widget &&
+                pad_widget_kind(row, deck, widget) == RX3_PAD_STRIP) {
+                pad_press_widget = (int)widget;
+                row->strip(deck, widget, 1u);
+                pad_row_invalidate();
+            }
+            return 1;
+        }
+        row->strip((unsigned int)pad_press_deck, (unsigned int)pad_press_widget, 0u);
+        pad_row_clear_press();
+        pad_row_invalidate();
         return 1;
     }
     if (phase == 2u) {

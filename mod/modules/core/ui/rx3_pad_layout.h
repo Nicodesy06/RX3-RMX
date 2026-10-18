@@ -41,7 +41,7 @@
 #define RX3_PAD_TOUCH_BOTTOM (RX3_PAD_CTRL_BOTTOM + RX3_PAD_LOCAL_TO_SCREEN_Y)
 
 /* RX3 PAD LAYOUT BEGIN */
-#define RX3_PAD_CELL_MAX 8
+#define RX3_PAD_CELL_MAX 12
 
 /* A stepper's arrow ends: a quarter of the cell, held between these so a narrow
    stepper keeps a readable value and a wide one does not grow two huge arrows. */
@@ -62,7 +62,7 @@ struct rx3_pad_cell { int x1, x2; };
  * so it spreads the remainder instead. Past five the shape simply continues.
  */
 static const int rx3_pad_gap[RX3_PAD_CELL_MAX + 1] = {
-    0, 0, 19, 17, 13, 11, 11, 9, 9
+    0, 0, 19, 17, 13, 11, 11, 9, 9, 7, 7, 6, 6
 };
 
 /* Lay count cells across span, in proportion to their weights.

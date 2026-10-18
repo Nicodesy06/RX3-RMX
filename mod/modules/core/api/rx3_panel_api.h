@@ -16,6 +16,10 @@
 #define RX3_PAD_STEPPER 2u   /* one widget, three parts: [-] [value] [+] */
 #define RX3_PAD_TOGGLE_SLIDER 4u /* tap toggles; hold 350 ms then drag adjusts */
 #define RX3_PAD_SLIDER  3u   /* drag, and tap anywhere in the track */
+#define RX3_PAD_STRIP   7u   /* X-PAD: neighbouring strip widgets are one touch strip */
+
+/* Widgets in one row. */
+#define RX3_PAD_ROW_MAX 12u
 
 /* A row is laid out inside one deck's half, or once across the screen and
    clipped into each half as it is drawn. */
@@ -92,6 +96,11 @@ struct rx3_pad_row {
     void (*activate)(unsigned int active);
     /* Optional, RX3_TAB_STATES slots; see RX3_TAB_PAIR_LEFT. */
     const uint8_t *tab_slots;
+    /* Required by STRIP widgets. A finger landing on one, or sliding onto
+       another, calls this with touching 1 and the widget now under it; the
+       release calls it once with touching 0 and the last one. A finger that
+       slides off the strip keeps its last section, as a touch strip does. */
+    void (*strip)(unsigned int deck, unsigned int widget, unsigned int touching);
 };
 
 

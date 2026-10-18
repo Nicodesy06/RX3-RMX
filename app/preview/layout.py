@@ -33,7 +33,7 @@ LOCAL_TO_SCREEN_Y = 500
 TOUCH_TOP = CTRL_TOP + LOCAL_TO_SCREEN_Y
 TOUCH_BOTTOM = CTRL_BOTTOM + LOCAL_TO_SCREEN_Y
 
-CELL_MAX = 8
+CELL_MAX = 12
 
 STEP_END_MIN = 40
 STEP_END_MAX = 96
@@ -42,7 +42,7 @@ STEP_VALUE_MIN = 16
 
 # The gap between controls, by how many there are. See the C for why the first
 # five are measurements and not a formula.
-GAP = (0, 0, 19, 17, 13, 11, 11, 9, 9)
+GAP = (0, 0, 19, 17, 13, 11, 11, 9, 9, 7, 7, 6, 6)
 
 
 @dataclass(frozen=True)

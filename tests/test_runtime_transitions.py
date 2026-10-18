@@ -721,6 +721,9 @@ static unsigned int status_test_kind(unsigned d,unsigned w){(void)d;(void)w;retu
 static int touch(unsigned int deck, int x, unsigned int phase) {
     return pad_row_touch(&samples_row, deck, x - (int)deck * 640, phase);
 }
+static unsigned strip_events, strip_last = 99, strip_touching, fired;
+static void strip_report(unsigned d, unsigned w, unsigned t) { (void)d; strip_events++; strip_last = w; strip_touching = t; }
+static void strip_fire(unsigned d, unsigned w, unsigned p) { (void)d; (void)w; (void)p; fired++; }
 
 int main(void) {
     struct rx3_pad_cell cells[RX3_PAD_CELL_MAX];
@@ -806,6 +809,37 @@ int main(void) {
     assert(pad_row_touch(&status,0,0,0));assert(samples_volume==80);
     assert(pad_row_touch(&status,0,200,1));status_kind=RX3_PAD_STATUS;
     assert(pad_row_touch(&status,0,0,0));assert(samples_volume==80);
+
+    /* X-PAD: ten cells, two buttons then a strip of eight. The strip acts on
+       contact, follows the finger across its sections, holds the last one off
+       its end, and reports one release. */
+    struct rx3_pad_widget xpad_widgets[10];
+    for (unsigned i = 0; i < 10; i++) {
+        xpad_widgets[i].kind = i < 2 ? RX3_PAD_BUTTON : RX3_PAD_STRIP;
+        xpad_widgets[i].weight = 1;
+    }
+    struct rx3_pad_row xpad = samples_row;
+    xpad.widgets = xpad_widgets; xpad.count = 10; xpad.scope = RX3_PAD_SCOPE_SCREEN;
+    xpad.strip = strip_report; xpad.fire = strip_fire; xpad.kind = 0;
+    struct rx3_pad_cell xcells[RX3_PAD_CELL_MAX];
+    assert(pad_row_cells(&xpad, 0u, xcells) == 10);
+    #define MID(i) ((xcells[i].x1 + xcells[i].x2) / 2)
+    #define XTOUCH(i, phase) pad_row_touch(&xpad, (unsigned)(MID(i) >= 640), MID(i) - (MID(i) >= 640 ? 640 : 0), phase)
+    assert(XTOUCH(3, 1u) && strip_events == 1 && strip_last == 3 && strip_touching);
+    /* Across the halves of the screen, as one gesture captured by deck one. */
+    assert(pad_row_touch(&xpad, 0, MID(8), 2u) && strip_last == 8 && strip_events == 2);
+    assert(pad_row_touch(&xpad, 0, MID(8) + 1, 2u) && strip_events == 2);   /* same section */
+    /* Onto a button and into a gap: the last section holds. */
+    assert(pad_row_touch(&xpad, 0, MID(1), 2u) && strip_last == 8 && strip_events == 2);
+    assert(pad_row_touch(&xpad, 0, MID(5), 2u) && strip_last == 5 && strip_events == 3);
+    assert(pad_row_touch(&xpad, 0, 0, 0u) && !strip_touching && strip_last == 5 && strip_events == 4);
+    assert(!fired);
+    /* The buttons stay buttons. */
+    assert(XTOUCH(0, 1u) && XTOUCH(0, 0u) && fired == 1 && strip_events == 4);
+    /* A row declaring a strip without its callback is refused by the core
+       elsewhere; here the kind falls back to a status and never fires. */
+    xpad.strip = 0;
+    assert(pad_widget_kind(&xpad, 0, 4) == RX3_PAD_STATUS);
     return 0;
 }
 """)

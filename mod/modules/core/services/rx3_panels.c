@@ -11,10 +11,11 @@ const struct rx3_pad_row *rx3_panel_find(unsigned int id)
 static int register_row(const struct rx3_pad_row *row)
 {
     if (!row || !row->panel_id || row->panel_id > PANEL_LIMIT ||
-        !row->count || row->count > 8u || !row->widgets ||
+        !row->count || row->count > RX3_PAD_ROW_MAX || !row->widgets ||
         row->scope > RX3_PAD_SCOPE_SCREEN) return 0;
     for (unsigned int i=0; i<row->count; i++) {
-        if (row->widgets[i].kind > RX3_PAD_OUTLINE_BUTTON) return 0;
+        if (row->widgets[i].kind > RX3_PAD_STRIP) return 0;
+        if (row->widgets[i].kind == RX3_PAD_STRIP && !row->strip) return 0;
         if ((row->widgets[i].kind == RX3_PAD_SLIDER || row->widgets[i].kind == RX3_PAD_TOGGLE_SLIDER) &&
             (!row->slider_get || !row->slider_set)) return 0;
     }
