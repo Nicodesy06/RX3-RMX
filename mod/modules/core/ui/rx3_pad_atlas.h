@@ -36,7 +36,7 @@
    larger than the repertoire so a character added to the artwork does not move
    the lookup bound, which is a guarded byte patch on the player and the one
    number here that is expensive to change. */
-#define RX3_PAD_GLYPH_IMAGE_BASE 0x1610u
+#define RX3_PAD_GLYPH_IMAGE_BASE 0x1620u
 #define RX3_PAD_GLYPH_IMAGE_MAX  150u
 
 /* Grounds, in the order the artwork stores them. These name a ground, not a

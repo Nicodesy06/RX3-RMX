@@ -22,6 +22,21 @@
 #define RX3_PAD_SCOPE_DECK   0u
 #define RX3_PAD_SCOPE_SCREEN 1u
 
+/* Optional tab artwork, as the image slots a module stages with
+   stage_panel_asset (11 and up; 0 keeps the core's own picture for that
+   state). The native pair pictures carry both captions, so the panel in the
+   right-hand slot names all three pair states; the status panel names its
+   three. Indexed by these: */
+#define RX3_TAB_PAIR_LEFT       0u  /* the left panel shown, this caption beside it */
+#define RX3_TAB_PAIR_NONE       1u
+#define RX3_TAB_PAIR_RIGHT      2u
+#define RX3_TAB_SINGLE_NONE     3u
+#define RX3_TAB_SINGLE_SELECTED 4u
+#define RX3_TAB_STATUS_SELECTED 5u
+#define RX3_TAB_STATUS_NONE     6u
+#define RX3_TAB_STATUS_BEATFX   7u
+#define RX3_TAB_STATES          8u
+
 struct rx3_pad_widget {
     unsigned char kind;
     unsigned char weight;   /* shares of the free width; 0 reads as 1 */
@@ -75,6 +90,8 @@ struct rx3_pad_row {
        visible panel, 0 whenever the core leaves or bypasses it. Calls with
        0 can repeat. Panel 3 replaces the native STATUS tab. */
     void (*activate)(unsigned int active);
+    /* Optional, RX3_TAB_STATES slots; see RX3_TAB_PAIR_LEFT. */
+    const uint8_t *tab_slots;
 };
 
 

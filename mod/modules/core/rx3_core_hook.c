@@ -53,7 +53,9 @@
 #define TAB_IMAGE_SINGLE_KEY_SELECTED 0x1608u
 #define TAB_IMAGE_SINGLE_STEMS_NONE 0x1609u
 #define TAB_IMAGE_SINGLE_STEMS_SELECTED 0x160au
-#define TAB_IMAGE_COUNT 11u
+/* Slots 11 to 18 hold artwork a panel names through tab_slots: ROLL/LOOP's
+   five and the second Color FX's three. */
+#define TAB_IMAGE_COUNT 19u
 /* Share the STATUS / BEAT FX top border; stop touches before that lower row. */
 #define CUSTOM_TAB_OFFSET_Y 21u
 #define CUSTOM_TAB_TOUCH_BOTTOM 431
@@ -63,7 +65,7 @@
    mod/modules/core/module.sh writes that largest id into the player's
    own bound. The two move together, with tests/test_module_consistency.py
    pinning them to each other and to the image-info guard below. */
-#define EXTENDED_IMAGE_COUNT 0x16a6u
+#define EXTENDED_IMAGE_COUNT 0x16b6u
 #define IMAGE_TABLE_POINTER RX3_IMAGE_TABLE_POINTER
 
 /* Types and libc declarations. */
@@ -816,30 +818,41 @@ static void show_startup_message_when_ready(void)
     }
 }
 
+/* A panel's own picture for one tab state, else the core's. */
+static uint32_t tab_art(const struct rx3_pad_row *row, unsigned int state, uint32_t fallback)
+{
+    unsigned int slot = row && row->tab_slots ? row->tab_slots[state] : 0u;
+    return slot && slot < TAB_IMAGE_COUNT ? TAB_IMAGE_KEY + slot : fallback;
+}
+
 static uint32_t performance_tab_image(const struct rx3_pad_row *left,
                                       const struct rx3_pad_row *right,
                                       unsigned int panel)
 {
     if (!left && !right) return 0u;
     if (left && right) {
-        const struct rx3_pad_row *active = panel == left->panel_id ? left :
-                                           panel == right->panel_id ? right : 0;
-        return active ? active->tab_image : TAB_IMAGE_KEY_NONE;
+        /* The pair pictures carry both captions; the right panel owns them. */
+        if (panel == left->panel_id) return tab_art(right, RX3_TAB_PAIR_LEFT, left->tab_image);
+        if (panel == right->panel_id) return tab_art(right, RX3_TAB_PAIR_RIGHT, right->tab_image);
+        return tab_art(right, RX3_TAB_PAIR_NONE, TAB_IMAGE_KEY_NONE);
     }
     if (left) return panel == left->panel_id ?
-                     TAB_IMAGE_SINGLE_KEY_SELECTED : TAB_IMAGE_SINGLE_KEY_NONE;
+                     tab_art(left, RX3_TAB_SINGLE_SELECTED, TAB_IMAGE_SINGLE_KEY_SELECTED) :
+                     tab_art(left, RX3_TAB_SINGLE_NONE, TAB_IMAGE_SINGLE_KEY_NONE);
     return panel == right->panel_id ?
-           TAB_IMAGE_SINGLE_STEMS_SELECTED : TAB_IMAGE_SINGLE_STEMS_NONE;
+           tab_art(right, RX3_TAB_SINGLE_SELECTED, TAB_IMAGE_SINGLE_STEMS_SELECTED) :
+           tab_art(right, RX3_TAB_SINGLE_NONE, TAB_IMAGE_SINGLE_STEMS_NONE);
 }
 
-static uint32_t performance_status_image(unsigned int status_panel,
+static uint32_t performance_status_image(const struct rx3_pad_row *status,
                                          unsigned int panel,
                                          uint32_t native_image)
 {
-    if (!status_panel) return panel ? TAB_IMAGE_STATUS_NONE : native_image;
-    if (panel == STATUS_PANEL) return TAB_IMAGE_SAMPLES;
-    if (!panel && native_image == 0x1598u) return TAB_IMAGE_SAMPLES_BEATFX;
-    return TAB_IMAGE_SAMPLES_NONE;
+    if (!status) return panel ? TAB_IMAGE_STATUS_NONE : native_image;
+    if (panel == STATUS_PANEL) return tab_art(status, RX3_TAB_STATUS_SELECTED, TAB_IMAGE_SAMPLES);
+    if (!panel && native_image == 0x1598u)
+        return tab_art(status, RX3_TAB_STATUS_BEATFX, TAB_IMAGE_SAMPLES_BEATFX);
+    return tab_art(status, RX3_TAB_STATUS_NONE, TAB_IMAGE_SAMPLES_NONE);
 }
 
 
@@ -1062,7 +1075,7 @@ static void hooked_draw_image(void *render, void *image)
         /* The native glyph can still contain the previous frame's selection.
            The setter owns selection; drawing must not overwrite it. */
         unsigned int selected_image=native_beatfx_selected?0x1598u:0x1599u;
-        unsigned int status_panel = row_for_id(STATUS_PANEL) != 0;
+        const struct rx3_pad_row *status_panel = row_for_id(STATUS_PANEL);
         if (tab_assets_ready && (overlay_panel || status_panel ||
                                  image_id!=selected_image)) {
             uint8_t neutral[0x54];
@@ -1719,7 +1732,7 @@ __attribute__((constructor)) static void initialize(void)
        This word, the count above and the module's replacement string are one
        fact in three files; a test compares them rather than trusting them. */
     static const uint8_t image_info_guard[8] = {
-        0xa5, 0x36, 0x01, 0xe3, 0x03, 0x00, 0x50, 0xe1
+        0xb5, 0x36, 0x01, 0xe3, 0x03, 0x00, 0x50, 0xe1
     };
     original_image_info = (image_info_fn)install_hook(
         &image_info_hook, 0x001d192c, image_info_guard, (void *)hooked_image_info);

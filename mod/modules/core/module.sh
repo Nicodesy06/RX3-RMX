@@ -22,13 +22,13 @@ register_runtime_preload "$CORE_LIB"
 # The pre-split name, so a rollback also unloads an older runtime.
 register_runtime_preload /root/pdj/librx3_stems.so
 
-# NS_GetImageInfoByID: movw r3,#0x15cc -> movw r3,#0x16a5. This guarded
+# NS_GetImageInfoByID: movw r3,#0x15cc -> movw r3,#0x16b5. This guarded
 # pre-launch word admits the private IDs in the secondary table without
-# hot-patching the renderer function: seven for the tab strip and a reserve for
-# the pad row's glyph atlas. The stock word is left as it is, because the
+# hot-patching the renderer function: nineteen for the tab strip, padded to
+# 0x1620, and a reserve for the pad row's glyph atlas. The stock word is left as it is, because the
 # orchestrator accepts only the stock or the patched value here and stops the
 # session on anything else, so a drive carrying an older mod is refused loudly.
-register_patch 1874220 '\314\065\001\343' '\245\066\001\343' image-table-private-ids
+register_patch 1874220 '\314\065\001\343' '\265\066\001\343' image-table-private-ids
 
 core_install_asset()
 {

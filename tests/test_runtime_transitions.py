@@ -995,12 +995,22 @@ int main(void){
 #define TAB_IMAGE_SINGLE_KEY_SELECTED 0x1608u
 #define TAB_IMAGE_SINGLE_STEMS_NONE 0x1609u
 #define TAB_IMAGE_SINGLE_STEMS_SELECTED 0x160au
+#define TAB_IMAGE_COUNT 19u
 #define STATUS_PANEL 3u
-struct rx3_pad_row {unsigned panel_id,tab_image;};
-''' + function(core, "performance_tab_image") +
+#define RX3_TAB_PAIR_LEFT 0u
+#define RX3_TAB_PAIR_NONE 1u
+#define RX3_TAB_PAIR_RIGHT 2u
+#define RX3_TAB_SINGLE_NONE 3u
+#define RX3_TAB_SINGLE_SELECTED 4u
+#define RX3_TAB_STATUS_SELECTED 5u
+#define RX3_TAB_STATUS_NONE 6u
+#define RX3_TAB_STATUS_BEATFX 7u
+struct rx3_pad_row {unsigned panel_id,tab_image;const uint8_t *tab_slots;};
+''' + function(core, "tab_art") + function(core, "performance_tab_image") +
             function(core, "performance_status_image") + r'''
 int main(void) {
-    struct rx3_pad_row key={1,TAB_IMAGE_KEY},stems={2,TAB_IMAGE_STEMS};
+    struct rx3_pad_row key={1,TAB_IMAGE_KEY,0},stems={2,TAB_IMAGE_STEMS,0};
+    struct rx3_pad_row samples={3,0,0};
     const unsigned none[]={0,TAB_IMAGE_SINGLE_KEY_NONE,
                             TAB_IMAGE_SINGLE_STEMS_NONE,TAB_IMAGE_KEY_NONE};
     for(unsigned key_on=0;key_on<2;key_on++)
@@ -1013,15 +1023,35 @@ int main(void) {
                             (stems_on?TAB_IMAGE_KEY:TAB_IMAGE_SINGLE_KEY_SELECTED));
           if(stems_on)assert(performance_tab_image(left,right,2)==
                               (key_on?TAB_IMAGE_STEMS:TAB_IMAGE_SINGLE_STEMS_SELECTED));
-          assert(performance_status_image(samples_on,0,0x1599u)==
+          const struct rx3_pad_row *status=samples_on?&samples:0;
+          assert(performance_status_image(status,0,0x1599u)==
                  (samples_on?TAB_IMAGE_SAMPLES_NONE:0x1599u));
-          assert(performance_status_image(samples_on,1,0x1599u)==
+          assert(performance_status_image(status,1,0x1599u)==
                  (samples_on?TAB_IMAGE_SAMPLES_NONE:TAB_IMAGE_STATUS_NONE));
           if(samples_on) {
-            assert(performance_status_image(1,3,0x1599u)==TAB_IMAGE_SAMPLES);
-            assert(performance_status_image(1,0,0x1598u)==TAB_IMAGE_SAMPLES_BEATFX);
+            assert(performance_status_image(status,3,0x1599u)==TAB_IMAGE_SAMPLES);
+            assert(performance_status_image(status,0,0x1598u)==TAB_IMAGE_SAMPLES_BEATFX);
           }
         }
+    /* A right-hand panel with artwork of its own names the pair pictures,
+       since they carry its caption; the left panel keeps its single ones. */
+    static const uint8_t rmx_slots[8]={11,12,13,14,15,0,0,0};
+    struct rx3_pad_row rmx={2,0,rmx_slots};
+    assert(performance_tab_image(&key,&rmx,1)==TAB_IMAGE_KEY+11u);
+    assert(performance_tab_image(&key,&rmx,0)==TAB_IMAGE_KEY+12u);
+    assert(performance_tab_image(&key,&rmx,2)==TAB_IMAGE_KEY+13u);
+    assert(performance_tab_image(0,&rmx,0)==TAB_IMAGE_KEY+14u);
+    assert(performance_tab_image(0,&rmx,2)==TAB_IMAGE_KEY+15u);
+    assert(performance_tab_image(&key,0,1)==TAB_IMAGE_SINGLE_KEY_SELECTED);
+    static const uint8_t fx2_slots[8]={0,0,0,0,0,16,17,18};
+    struct rx3_pad_row fx2={3,0,fx2_slots};
+    assert(performance_status_image(&fx2,3,0x1599u)==TAB_IMAGE_KEY+16u);
+    assert(performance_status_image(&fx2,0,0x1599u)==TAB_IMAGE_KEY+17u);
+    assert(performance_status_image(&fx2,0,0x1598u)==TAB_IMAGE_KEY+18u);
+    /* A slot past the table falls back rather than reading past it. */
+    static const uint8_t wild[8]={40,40,40,40,40,40,40,40};
+    struct rx3_pad_row stray={2,TAB_IMAGE_STEMS,wild};
+    assert(performance_tab_image(&key,&stray,0)==TAB_IMAGE_KEY_NONE);
     return 0;
 }
 ''')
