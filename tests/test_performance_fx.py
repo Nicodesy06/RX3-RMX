@@ -366,6 +366,19 @@ module_export(){{ printf 'EXPORT %s=%s\\n' "$1" "$2"; return 1; }}
             out = self.run_prepare('dual-color-fx', 'dual_color_fx_prepare', {'buttons.txt': bad})
             self.assertIn('EXPORT RX3_FX2_BUTTONS=\n', out)
 
+    def test_symbol_finder_reads_an_arm_symbol_table(self):
+        """Run on the hook itself: the only ARM ELF this repository may hold."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('finder', ROOT / 'scripts/find_fx_symbols.py')
+        finder = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(finder)
+        hook = ROOT / 'build/librx3_core.so'
+        if not hook.is_file():
+            self.skipTest('build the hook first: make hook')
+        names = {name for _, _, name in finder.symbols(hook.read_bytes())}
+        self.assertIn('fx2_stream', names)
+        self.assertIn('rmx_master', names)
+
     def test_probe_line_format(self):
         """The probe line is what buttons.txt is written from: hexadecimal."""
         source = (test_framework.MODULES / 'dual-color-fx/rx3_fx2_feature.h').read_text()
