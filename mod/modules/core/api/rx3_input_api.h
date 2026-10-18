@@ -55,6 +55,12 @@ typedef void (*rx3_light_fn)(unsigned int deck, unsigned int control, struct rx3
 #define RX3_LIGHTS_SLIP_LOOP 0u
 #define RX3_LIGHTS_PADS      1u
 
+/* Every other LED the unit-wide refresh carries, by its native ID and
+   channel, after the player has set it. Answering RX3_LIGHT_NATIVE leaves it.
+   Which IDs belong to which controls is not documented: a filter that only
+   watches is how to find out. Input thread; no allocation, I/O or waiting. */
+typedef void (*rx3_led_filter_fn)(unsigned int id, unsigned int channel, struct rx3_light *);
+
 struct rx3_input_service {
     int (*register_pad)(const void *owner, unsigned int priority, rx3_pad_handler);
     int (*register_key)(const void *owner, unsigned int priority, rx3_key_handler);
@@ -72,6 +78,12 @@ struct rx3_input_service {
        lights and on-screen controls share it, so they cannot drift apart. */
     int (*blink_on)(void);
     void (*blink_restart)(void);
+    /* API 20. Up to four filters, asked in registration order. */
+    int (*register_led_filter)(const void *owner, rx3_led_filter_fn);
+    /* Inside a key handler only: the three further arguments SEND_KEY carried
+       with this key, whose meaning is not documented. A control that is not a
+       button may carry its value there; the probe in COLOR 2 records them. */
+    void (*key_arguments)(unsigned int out[3]);
 };
 extern const struct rx3_input_service rx3_input;
 #endif

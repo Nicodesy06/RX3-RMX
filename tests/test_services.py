@@ -47,7 +47,11 @@ static void *original_for(unsigned long a) {
 static struct rx3_pad_event last;
 static int first(const struct rx3_pad_event *e) { first_calls++; last = *e; return first_takes; }
 static int second(const struct rx3_pad_event *e) { (void)e; second_calls++; return 0; }
-static int watch(const struct rx3_key_event *e) { keys_seen += e->key == RX3_KEY_SHIFT; return e->key == 0x0210u; }
+static unsigned extras[3];
+static int watch(const struct rx3_key_event *e) {
+    rx3_input.key_arguments(extras);
+    keys_seen += e->key == RX3_KEY_SHIFT; return e->key == 0x0210u;
+}
 static const char a = 0, b = 0;
 int main(void) {
     /* Registration order does not decide dispatch order; priority does. */
@@ -76,6 +80,8 @@ int main(void) {
     assert(key(0, RX3_KEY_SHIFT, 0, 2, 0, 0, 0) == 9 && keys_seen == 1);
     assert(rx3_input.shift_held(2) && rx3_input.shift_held(RX3_NO_DECK) && !rx3_input.shift_held(1));
     assert(key(0, 0x0210u, 0, 0, 0, 0, 0) == 0);
+    /* The further SEND_KEY arguments reach the handler that asks for them. */
+    assert(key(0, 0x0211u, 0, 1, 7, 8, 9) == 9 && extras[0] == 7 && extras[1] == 8 && extras[2] == 9);
     assert(key(0, RX3_KEY_SHIFT, 3, 2, 0, 0, 0) == 9 && !rx3_input.shift_held(RX3_NO_DECK));
     /* A refused restore keeps the trampoline and passes everything through. */
     refuse_detach = 1; rx3_input.unregister_owner(&a);
@@ -109,6 +115,11 @@ static void pads(unsigned deck, unsigned control, struct rx3_light *light) {
     (void)deck;
     if (control == RX3_LIGHT_SHIFT) { light->state = RX3_LIGHT_ON; light->rgb = 0xff0000; }
     if (control == 0) { light->state = RX3_LIGHT_DIM; light->rgb = 0x123456; }
+}
+static unsigned filtered;
+static void filter(unsigned id, unsigned channel, struct rx3_light *light) {
+    filtered++; assert(id == 30 || id == 9 || id == 0); (void)channel;
+    if (id == 30) { light->state = RX3_LIGHT_ON; light->rgb = 0x00ff00; }
 }
 static uint8_t entries[6][44];
 static void set_led(unsigned i, unsigned id, unsigned channel) {
@@ -147,12 +158,40 @@ int main(void) {
     assert(count == 4);
     assert(writes[0].led == entries[0] && writes[0].state == 1 && writes[1].flag == 1 && writes[1].rgb == 0x123456);
     assert(writes[2].led == entries[2] && writes[3].flag == 0 && writes[3].rgb == 0xff0000);
+    /* A LED filter sees every entry that is not a pad or SHIFT, by native ID
+       and channel, and lights only what it answers for. */
+    assert(rx3_input.register_led_filter(&owner, filter));
+    assert(!rx3_input.register_led_filter(&owner, filter));
+    count = 0; filtered = 0; pad_refresh(0, list);
+    assert(filtered == 3 && count == 6);
+    assert(writes[4].led == entries[3] && writes[5].rgb == 0x00ff00);
     /* The last owner gone, both native refreshes are handed back. */
     rx3_input.unregister_owner(&owner);
     assert(detached == 2 && released == 2);
     return 0;
 }
 """, [], ['-D_DEFAULT_SOURCE', '-D_DARWIN_C_SOURCE'])
+
+    def test_band_masks_have_one_provider_and_default_to_every_band(self):
+        self.run_units(r'''
+#include "core/api/rx3_band_api.h"
+static const char isolator = 0, other = 0;
+int main(void) {
+    assert(rx3_bands.mask(0) == RX3_BAND_ALL && rx3_bands.mask(5) == RX3_BAND_ALL);
+    rx3_bands.set(&isolator, 0, RX3_BAND_HIGH);          /* not a provider yet */
+    assert(rx3_bands.mask(0) == RX3_BAND_ALL);
+    assert(rx3_bands.provide(&isolator) && !rx3_bands.provide(&other));
+    rx3_bands.set(&isolator, 0, RX3_BAND_MID | RX3_BAND_HIGH);
+    rx3_bands.set(&other, 1, RX3_BAND_LOW);               /* not the provider */
+    assert(rx3_bands.mask(0) == (RX3_BAND_MID | RX3_BAND_HIGH) && rx3_bands.mask(1) == RX3_BAND_ALL);
+    rx3_bands.set(&isolator, 1, 0);                       /* none means all */
+    assert(rx3_bands.mask(1) == RX3_BAND_ALL);
+    rx3_bands.withdraw(&other); assert(rx3_bands.mask(0) != RX3_BAND_ALL);
+    rx3_bands.withdraw(&isolator); assert(rx3_bands.mask(0) == RX3_BAND_ALL);
+    assert(rx3_bands.provide(&other));
+    return 0;
+}
+''', ['core/services/rx3_bands.c'])
 
     def test_memory_ledger_counts_what_others_have_in_flight(self):
         self.run_units(r"""
