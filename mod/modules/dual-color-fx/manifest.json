@@ -1,0 +1,69 @@
+{
+  "id": "dual-color-fx",
+  "name": {
+    "en": "COLOR 2 (second Sound Color FX)",
+    "fr": "COLOR 2 (second Sound Color FX)"
+  },
+  "description": {
+    "en": "A second Sound Color FX on each channel, in series with the mixer's own: FILTER, DUB ECHO, SPACE, CRUSH, NOISE or SWEEP, each remembering its own settings.",
+    "fr": "Un second Sound Color FX sur chaque voie, en série avec celui de la table : FILTER, DUB ECHO, SPACE, CRUSH, NOISE ou SWEEP, chacun gardant ses réglages."
+  },
+  "firmwares": [
+    "1.19",
+    "1.20"
+  ],
+  "default": false,
+  "order": 46,
+  "category": "performance-fx",
+  "runtime_directory": "dual-color-fx",
+  "namespace": "dual_color_fx",
+  "requires": [
+    "core"
+  ],
+  "conflicts": [
+    "samples"
+  ],
+  "files": [
+    {
+      "source": "module.sh",
+      "target": "module.sh",
+      "executable": false
+    },
+    {
+      "source": "assets/fx2-selected.rgb565",
+      "target": "fx2-selected.rgb565",
+      "executable": false
+    },
+    {
+      "source": "assets/fx2-selected-light.rgb565",
+      "target": "fx2-selected-light.rgb565",
+      "executable": false
+    },
+    {
+      "source": "assets/fx2-none-selected.rgb565",
+      "target": "fx2-none-selected.rgb565",
+      "executable": false
+    },
+    {
+      "source": "assets/fx2-none-selected-light.rgb565",
+      "target": "fx2-none-selected-light.rgb565",
+      "executable": false
+    },
+    {
+      "source": "assets/fx2-beatfx-selected.rgb565",
+      "target": "fx2-beatfx-selected.rgb565",
+      "executable": false
+    },
+    {
+      "source": "assets/fx2-beatfx-selected-light.rgb565",
+      "target": "fx2-beatfx-selected-light.rgb565",
+      "executable": false
+    }
+  ],
+  "build_files": [
+    "rx3_fx2_module.c",
+    "rx3_fx2_decl.h",
+    "rx3_fx2_feature.h",
+    "rx3_fx2_panel.h"
+  ]
+}

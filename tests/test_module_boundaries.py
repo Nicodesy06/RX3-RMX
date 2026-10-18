@@ -69,7 +69,7 @@ class ModuleBoundaryTests(unittest.TestCase):
                 slots.add(slot)
                 self.assertIn(name+'.rgb565', packaged)
                 self.assertIn(name+'-light.rgb565', packaged)
-        self.assertEqual(slots, {f'{i:02d}' for i in range(11)})
+        self.assertEqual(slots, {f'{i:02d}' for i in range(19)})
 
     def test_asshole_module_links_alone_and_releases_partial_artwork(self):
         self.run_units(r'''

@@ -153,15 +153,17 @@ for (const language of ['en', 'fr']) {
     const allGroups=ui.document.getElementById('module-list').children;
     const groups=allGroups.filter(group=>group.id!=='modules-advanced');
     assert.deepEqual(Array.from(groups,group=>group.dataset.category),
-      ['beatjump','harmonic-mixing','samples','stems','screen','streaming','diagnostics']);
+      ['beatjump','harmonic-mixing','performance-fx','samples','stems','screen','streaming','diagnostics']);
     for(const group of groups) {
       const module=data.modules.find(item=>item.category===group.dataset.category);
       assert.equal(group.children[0].children[0].children[0].textContent,module.categoryUi.name[language]);
     }
-    assert.ok(find(groups[1],'module-toggle-keyshift'));
-    assert.ok(find(groups[1],'module-toggle-key-match'));
-    assert.ok(find(groups[1],'key-match-rule-2'));
-    assert.ok(find(groups[2],'module-toggle-samples'));
+    const group=category=>groups.find(item=>item.dataset.category===category);
+    assert.ok(find(group('harmonic-mixing'),'module-toggle-keyshift'));
+    assert.ok(find(group('harmonic-mixing'),'module-toggle-key-match'));
+    assert.ok(find(group('harmonic-mixing'),'key-match-rule-2'));
+    assert.ok(find(group('samples'),'module-toggle-samples'));
+    assert.ok(find(group('performance-fx'),'module-toggle-rmx-looper'));
     assert.equal(allGroups.some(group=>group.id==='modules-advanced'),false);
     assert.equal(find(ui.document.getElementById('module-list'),'module-toggle-core'),undefined);
     assert.equal(find(ui.document.getElementById('module-list'),'module-toggle-decoder-sleep'),undefined);

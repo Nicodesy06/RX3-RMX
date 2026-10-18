@@ -18,6 +18,19 @@
     }
   },
   {
+    "id": "performance-fx",
+    "order": 25,
+    "collapsed": false,
+    "name": {
+      "en": "Performance FX",
+      "fr": "Effets de performance"
+    },
+    "description": {
+      "en": "A second Sound Color FX and an RMX-style roll and live looper, played from the pads and the touchscreen.",
+      "fr": "Un second Sound Color FX, un roll et une boucle live façon RMX, joués aux pads et à l'écran tactile."
+    }
+  },
+  {
     "id": "samples",
     "order": 30,
     "collapsed": false,

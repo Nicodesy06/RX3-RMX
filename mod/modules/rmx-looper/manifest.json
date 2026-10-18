@@ -1,0 +1,89 @@
+{
+  "id": "rmx-looper",
+  "name": {
+    "en": "ROLL / LOOP FX",
+    "fr": "ROLL / LOOP FX"
+  },
+  "description": {
+    "en": "RMX-style roll on the pads, synced to the deck's BPM, with HOLD, and a live loop on its own bus with OVERDUB layers, undo and level.",
+    "fr": "Roll façon RMX sur les pads, calé sur le BPM de la platine, avec HOLD, et une boucle live sur son propre bus avec couches OVERDUB, annulation et niveau."
+  },
+  "firmwares": [
+    "1.19",
+    "1.20"
+  ],
+  "default": false,
+  "order": 44,
+  "category": "performance-fx",
+  "runtime_directory": "rmx-looper",
+  "namespace": "rmx_looper",
+  "requires": [
+    "core"
+  ],
+  "conflicts": [
+    "stems"
+  ],
+  "files": [
+    {
+      "source": "module.sh",
+      "target": "module.sh",
+      "executable": false
+    },
+    {
+      "source": "assets/rmx-key-selected.rgb565",
+      "target": "rmx-key-selected.rgb565",
+      "executable": false
+    },
+    {
+      "source": "assets/rmx-key-selected-light.rgb565",
+      "target": "rmx-key-selected-light.rgb565",
+      "executable": false
+    },
+    {
+      "source": "assets/rmx-none-selected.rgb565",
+      "target": "rmx-none-selected.rgb565",
+      "executable": false
+    },
+    {
+      "source": "assets/rmx-none-selected-light.rgb565",
+      "target": "rmx-none-selected-light.rgb565",
+      "executable": false
+    },
+    {
+      "source": "assets/rmx-selected.rgb565",
+      "target": "rmx-selected.rgb565",
+      "executable": false
+    },
+    {
+      "source": "assets/rmx-selected-light.rgb565",
+      "target": "rmx-selected-light.rgb565",
+      "executable": false
+    },
+    {
+      "source": "assets/single-rmx-none.rgb565",
+      "target": "single-rmx-none.rgb565",
+      "executable": false
+    },
+    {
+      "source": "assets/single-rmx-none-light.rgb565",
+      "target": "single-rmx-none-light.rgb565",
+      "executable": false
+    },
+    {
+      "source": "assets/single-rmx-selected.rgb565",
+      "target": "single-rmx-selected.rgb565",
+      "executable": false
+    },
+    {
+      "source": "assets/single-rmx-selected-light.rgb565",
+      "target": "single-rmx-selected-light.rgb565",
+      "executable": false
+    }
+  ],
+  "build_files": [
+    "rx3_rmx_module.c",
+    "rx3_rmx_decl.h",
+    "rx3_rmx_feature.h",
+    "rx3_rmx_panel.h"
+  ]
+}
