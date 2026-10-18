@@ -309,7 +309,11 @@ static void fx2_report(void)
         log_line(line);
         __atomic_store_n(&fx2_probe_reported, i + 1u, __ATOMIC_SEQ_CST);
     }
-    log_number("fx2 deck 1 bpm x100 = ", fx2_bpm_x100[0]);
+    static unsigned int reports;
+    if (reports++ < 3u) {
+        log_number("fx2 deck 1 bpm x100 = ", fx2_bpm_x100[0]);
+        log_number("fx2 deck 2 bpm x100 = ", fx2_bpm_x100[1]);
+    }
 }
 
 #endif /* RX3_FX2_FEATURE_H */

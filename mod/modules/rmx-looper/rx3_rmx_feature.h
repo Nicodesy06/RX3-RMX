@@ -44,6 +44,13 @@ static int rmx_worker_started;
 
 /* Diagnostics, written by the audio thread and read by report(). */
 static volatile unsigned int rmx_blocks, rmx_slow_blocks, rmx_worst_us, rmx_largest_block;
+/* The roll and the fifo assume each deck's stream is called once per block,
+   in order. These say whether it is: frames per deck and on the master since
+   the last report, and calls whose position did not move. */
+static volatile unsigned int rmx_deck_frames[2], rmx_master_frames, rmx_deck_repeats[2];
+static int rmx_deck_last_position[2] = {-1, -1};
+static uint64_t rmx_report_us;
+static unsigned int rmx_reports;
 
 static void *rmx_buffers[RMX_ROLLS + FX_LOOP_SLOTS + 1u];
 static unsigned long rmx_buffer_bytes;
@@ -133,8 +140,12 @@ static int rmx_running(void)
 static void rmx_deck_roll(unsigned int deck, const void *reader, int position,
                           struct rx3_stereo *output, unsigned int frames)
 {
-    (void)reader; (void)position;
-    if (deck < 2u && rmx_running())
+    (void)reader;
+    if (deck >= 2u) return;
+    rmx_deck_frames[deck] += frames;
+    if (position == rmx_deck_last_position[deck]) rmx_deck_repeats[deck]++;
+    rmx_deck_last_position[deck] = position;
+    if (rmx_running())
         fx_roll_process(&rmx_rolls[deck], (struct fx_frame *)(void *)output, frames);
 }
 
@@ -150,6 +161,7 @@ static void rmx_deck_tap(unsigned int deck, const void *reader, int position,
 
 static void rmx_master(struct rx3_stereo *output, unsigned int frames)
 {
+    rmx_master_frames += frames;
     if (!rmx_running()) return;
     uint64_t began = rmx_now_us();
     struct fx_frame *bus = (struct fx_frame *)(void *)output;
@@ -550,12 +562,29 @@ static void rmx_started_audio(unsigned int rate)
     log_number("rmx sample rate = ", rate);
 }
 
-/* Every ten seconds or so from the core's diagnostic worker: enough to tell
+/* From the core's diagnostic worker, every five seconds: enough to tell
    on hardware whether the two stages share a thread, whether the tempo reads
    right and how much time the engines take. */
 static void rmx_report(void)
 {
     if (!__atomic_load_n(&rmx_live, __ATOMIC_SEQ_CST)) return;
+    /* The log is shared and capped: every report for the first minute, then
+       one every five, so a long set leaves room for everybody else's lines.
+       The counters keep running between the reports that are written. */
+    unsigned int report = rmx_reports++;
+    if (report >= 12u && report % 60u) return;
+    uint64_t now = rmx_now_us();
+    unsigned int elapsed_ms = rmx_report_us ? (unsigned int)((now - rmx_report_us) / 1000u) : 0u;
+    rmx_report_us = now;
+    /* Each figure against the sample rate times the elapsed time: equal for a
+       stream called once per block, a multiple of it for one that is not. */
+    log_number("rmx report ms = ", elapsed_ms);
+    log_number("rmx master frames = ", rmx_master_frames);
+    log_number("rmx deck 1 frames = ", rmx_deck_frames[0]);
+    log_number("rmx deck 2 frames = ", rmx_deck_frames[1]);
+    log_number("rmx deck 1 repeated positions = ", rmx_deck_repeats[0]);
+    log_number("rmx deck 2 repeated positions = ", rmx_deck_repeats[1]);
+    rmx_master_frames = rmx_deck_frames[0] = rmx_deck_frames[1] = 0u;
     log_number("rmx blocks = ", rmx_blocks);
     log_number("rmx worst us = ", rmx_worst_us);
     log_number("rmx largest block = ", rmx_largest_block);
