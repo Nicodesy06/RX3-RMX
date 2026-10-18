@@ -103,7 +103,9 @@
     "api/rx3_fx_color.h",
     "api/rx3_fx_rmx.h",
     "api/rx3_band_api.h",
-    "services/rx3_bands.c"
+    "services/rx3_bands.c",
+    "api/rx3_fx_xpad.h",
+    "api/rx3_fx_bands.h"
   ],
   "arm_hook": {
     "source": "rx3_core_hook.c",

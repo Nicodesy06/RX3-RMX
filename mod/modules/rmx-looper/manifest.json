@@ -1,12 +1,12 @@
 {
   "id": "rmx-looper",
   "name": {
-    "en": "ROLL / LOOP FX",
-    "fr": "ROLL / LOOP FX"
+    "en": "RMX X-PAD",
+    "fr": "RMX X-PAD"
   },
   "description": {
-    "en": "RMX-style roll on the pads, synced to the deck's BPM, with HOLD, and a live loop on its own bus with OVERDUB layers, undo and level.",
-    "fr": "Roll façon RMX sur les pads, calé sur le BPM de la platine, avec HOLD, et une boucle live sur son propre bus avec couches OVERDUB, annulation et niveau."
+    "en": "The RMX-1000's X-PAD FX: ROLL, KICK, SNARE, CLAP and HI HAT on a touch strip you slide along, with HOLD, a four-beat OVERDUB, PITCH and VOLUME, synced to the deck's BPM.",
+    "fr": "Le X-PAD FX de la RMX-1000 : ROLL, KICK, SNARE, CLAP et HI HAT sur une bande tactile à glisser, avec HOLD, OVERDUB sur quatre temps, PITCH et VOLUME, calés sur le BPM de la platine."
   },
   "firmwares": [
     "1.19",

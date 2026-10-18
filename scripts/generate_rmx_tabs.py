@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MPL-2.0
-"""Relabel the native performance tabs for ROLL/LOOP FX and the second Color FX.
+"""Relabel the native performance tabs for the RMX X-PAD and ISOLATOR.
 
 The tab strip artwork is the firmware's own, captured by the KEY, STEMS and
 SAMPLES modules. Their frames, corner radius and fill texture are kept; only
@@ -29,8 +29,8 @@ JOBS = (
     ("keyshift", "key-selected", "rmx-looper", "rmx-key-selected", "right", "RMX"),
     ("keyshift", "none-selected", "rmx-looper", "rmx-none-selected", "right", "RMX"),
     ("stems", "stems-selected", "rmx-looper", "rmx-selected", "right", "RMX"),
-    ("stems", "single-stems-none", "rmx-looper", "single-rmx-none", "whole", "ROLL / LOOP"),
-    ("stems", "single-stems-selected", "rmx-looper", "single-rmx-selected", "whole", "ROLL / LOOP"),
+    ("stems", "single-stems-none", "rmx-looper", "single-rmx-none", "whole", "RMX X-PAD"),
+    ("stems", "single-stems-selected", "rmx-looper", "single-rmx-selected", "whole", "RMX X-PAD"),
     ("samples", "samples-selected", "dual-color-fx", "fx2-selected", "left", "COLOR 2"),
     ("samples", "samples-none-selected", "dual-color-fx", "fx2-none-selected", "left", "COLOR 2"),
     ("samples", "samples-beatfx-selected", "dual-color-fx", "fx2-beatfx-selected", "left", "COLOR 2"),

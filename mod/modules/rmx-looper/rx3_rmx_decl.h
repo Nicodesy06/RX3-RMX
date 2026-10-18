@@ -26,7 +26,7 @@ static const void *rmx_bpm_prologue = (const void *)RMX_PLAY_BPM;
 /* Places on the audio stages. Deck: Stems (50) mixes first, the roll inserts
    after it (55), the second Color FX after the roll (60) so a filter can be
    swept over a roll, and the loop's tap last (65), hearing all of it. Master:
-   Samples (50) first, then the master roll and the loop (60), so a sample
+   Samples (50) first, then the master roll and the X-PAD (60), so a sample
    can be rolled or overdubbed like anything else on the bus. */
 #define RMX_DECK_ROLL_PRIORITY 55u
 #define RMX_DECK_TAP_PRIORITY 65u
@@ -43,19 +43,24 @@ static const void *rmx_bpm_prologue = (const void *)RMX_PLAY_BPM;
 #define RMX_SOURCE_MASTER 2u
 #define RMX_ROLLS 3u                  /* deck 1, deck 2, master */
 
-/* Divisions in beats, one per pad. */
-#define RMX_DIVISIONS 8u
-static const float rmx_division_beats[RMX_DIVISIONS] = {
-    0.0625f, 0.125f, 0.25f, 0.5f, 1.0f, 2.0f, 4.0f, 8.0f
+/* The X-PAD strip's five sections, as on the RMX-1000: 1/8 to 2/1 of a beat.
+   With SHIFT held as the finger lands, the strip plays an octave finer. */
+#define RMX_STRIP_SECTIONS 5u
+static const float rmx_strip_beats[RMX_STRIP_SECTIONS] = {0.125f, 0.25f, 0.5f, 1.0f, 2.0f};
+static const uint16_t rmx_strip_text[2][RMX_STRIP_SECTIONS][5] = {
+    {{'1','/','8',0}, {'1','/','4',0}, {'1','/','2',0}, {'1','/','1',0}, {'2','/','1',0}},
+    {{'1','/','1','6',0}, {'1','/','8',0}, {'1','/','4',0}, {'1','/','2',0}, {'1','/','1',0}}
 };
-static const uint16_t rmx_division_text[RMX_DIVISIONS][5] = {
-    {'1','/','1','6',0}, {'1','/','8',0}, {'1','/','4',0}, {'1','/','2',0},
-    {'1',0}, {'2',0}, {'4',0}, {'8',0}
-};
-/* A loop shorter than a quarter of a beat is a buzz, not a loop. */
-#define RMX_LOOP_MIN_DIVISION 2u
 
-/* The deck stream hands the loop its source through one of these: written by
+/* The X-PAD FX buttons, left to right as on the RMX: ROLL, then the sounds. */
+#define RMX_PICK_ROLL 0u
+#define RMX_PICKS (1u + FX_XPAD_SOUNDS)
+static const char *const rmx_sound_files[FX_XPAD_SOUNDS] = {"kick.wav", "snare.wav", "clap.wav", "hat.wav"};
+/* A sound from the drive is at most this long and this many bytes. */
+#define RMX_WAV_MAX_SECONDS 4u
+#define RMX_WAV_MAX_BYTES (48000u * 4u * RMX_WAV_MAX_SECONDS + 4096u)
+
+/* A deck's rolled signal reaches the OVERDUB through one of these: written by
    the deck's audio thread, read by the master's. They may be one thread or
    two; this does not assume either. */
 #define RMX_FIFO_FRAMES 16384u        /* a power of two */

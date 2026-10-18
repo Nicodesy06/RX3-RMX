@@ -109,119 +109,137 @@ class PerformanceFxTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn('all fx engine checks passed', result.stdout)
 
-    def test_roll_loop_module_through_its_callbacks(self):
+    def test_rmx_xpad_module_through_its_callbacks(self):
         self.run_units(MOCKS + r'''
 #include "rmx-looper/rx3_rmx_module.c"
 static struct rx3_stereo in[512], out[512], bus[512];
+static void master_block(void) { memset(bus, 0, sizeof(bus)); master(bus, 512); }
+static float bus_peak(void) { float p = 0; for (unsigned i = 0; i < 512; i++) if (fx_absf(bus[i].left) > p) p = fx_absf(bus[i].left); return p; }
 int main(void) {
     rmx_bpm_reader = bpm; rmx_bpm_prologue = prologue;
     setenv("RX3_RMX", "1", 1);
     assert(rx3_rmx_module.start(&services) == 1);
-    /* Two places on the deck stream around COLOR 2's, one on the master
-       after Samples', the panel in the right-hand tab with its own art. */
     assert(deck_count == 2 && decks[0].priority == 55 && decks[1].priority == 65);
     assert(master && master_priority == 60);
-    assert(row && row->panel_id == 2 && row->tab_slots && row->tab_slots[RX3_TAB_PAIR_LEFT] == 11);
-    assert(pad && light && modes == 1);
+    /* Twelve controls: five X-PAD FX buttons, a five-section strip, PITCH, VOL. */
+    assert(row && row->panel_id == 2 && row->count == 12 && row->strip);
+    assert(row->widgets[RMX_W_PICK].kind == RX3_PAD_TOGGLE && row->widgets[RMX_W_STRIP].kind == RX3_PAD_STRIP);
+    assert(row->tab_slots[RX3_TAB_PAIR_LEFT] == 11 && pad && light && modes == 1);
     rx3_rmx_module.audio_started(44100);
     for (unsigned i = 0; i < 200 && rmx_bpm_x100[0] != 12800; i++) usleep(10000);
-    assert(rmx_bpm_x100[0] == 12800 && rmx_bpm_x100[1] == 9000);
+    assert(rmx_bpm_x100[0] == 12800);
+    const uint16_t *c = row->caption(0, RMX_W_PICK, 0);
+    assert(c[0] == 'R' && c[5] == '1');                  /* ROLL names its source */
+    c = row->caption(0, RMX_W_STRIP, 0); assert(c[0] == '1' && c[2] == '8');
 
-    /* Off the panel the pads belong to the player. */
-    struct rx3_pad_event e = press(0x4119, 0);
-    assert(!pad(&e));
-    row->activate(1);
-
-    /* Pad 3 is 1/4 beat; at 128 BPM that is 5168 frames. */
+    /* ROLL is chosen; the strip at 1/4 rolls deck 1 at 1/4 beat of 128 BPM. */
+    assert(rmx_pick == RMX_PICK_ROLL);
+    row->strip(0, RMX_W_STRIP + 1, 1);
+    assert(rmx_strip_roll == 1 && rmx_section == 1 && row->is_on(0, RMX_W_STRIP + 1, 0));
     const unsigned length = 5168;
-    assert(rmx_frames_for(0, 2) == length);
-    assert(pad(&e) && rmx_pad_roll[0] == 1);
     static float history[44100];
     unsigned t = 0;
     for (; t < 44100 - 512; t += 512) {
-        tone(in, 512, t, 330.0f); memcpy(out, in, sizeof(in));
-        run_deck(0, out, 512);
+        tone(in, 512, t, 330.0f); memcpy(out, in, sizeof(in)); run_deck(0, out, 512);
         for (unsigned i = 0; i < 512; i++) history[t + i] = out[i].left;
+        master_block();
     }
     float worst = 0;
     for (unsigned i = length + 600; i + length < t; i++) {
         float d = fx_absf(history[i] - history[i + length]); if (d > worst) worst = d;
     }
     assert(worst < 1e-5f);
-    /* The pad lights: the rolling division full, the others dim. */
-    struct rx3_light l = {RX3_LIGHT_NATIVE, 0};
-    light(0, 2, &l); assert(l.state == RX3_LIGHT_ON);
-    l.state = RX3_LIGHT_NATIVE; light(0, 5, &l); assert(l.state == RX3_LIGHT_DIM);
-
-    /* Letting go returns the live deck, exactly, after the release ramp. */
-    e = lift(0x4119, 0); assert(pad(&e) && rmx_pad_roll[0] == 0);
-    for (unsigned b = 0; b < 4; b++) { tone(in, 512, t, 330.0f); memcpy(out, in, sizeof(in)); run_deck(0, out, 512); t += 512; }
+    /* Sliding to 1/2 keeps the roll and doubles the slice. */
+    row->strip(0, RMX_W_STRIP + 2, 1);
+    assert(rmx_strip_roll == 1 && rmx_section == 2 && (rmx_rolls[0].request & FX_ROLL_LENGTH_MASK) == rmx_frames_of_beats(0.5f));
+    /* Lifting stops it: the deck is back exactly after the ramp. */
+    row->strip(0, RMX_W_STRIP + 2, 0);
+    assert(!rmx_strip_roll && rmx_section == -1);
+    for (unsigned b = 0; b < 5; b++) { tone(in, 512, t, 330.0f); memcpy(out, in, sizeof(in)); run_deck(0, out, 512); t += 512; }
     tone(in, 512, t, 330.0f); memcpy(out, in, sizeof(in)); run_deck(0, out, 512);
     assert(!memcmp(in, out, sizeof(in)));
 
-    /* SHIFT + pad 1 is HOLD: a released pad keeps rolling until HOLD goes. */
-    shift = 1; e = press(0x4117, 0); assert(pad(&e)); shift = 0;
+    /* A sound button plays at once and becomes the strip's sound. */
+    row->fire(0, RMX_W_PICK + 1, 0);
+    assert(rmx_pick == 1);
+    master_block(); assert(bus_peak() > 0.1f);
+    /* The strip now repeats the kick; HOLD (pad 6 tapped) keeps it after the lift. */
+    row->activate(1);
+    struct rx3_pad_event e = press(0x411c, 0); assert(pad(&e)); e = lift(0x411c, 0); assert(pad(&e));
     assert(rmx_hold);
-    e = press(0x411b, 0); assert(pad(&e)); e = lift(0x411b, 0); assert(pad(&e));
-    assert(rmx_pad_roll[0] == 1);
-    shift = 1; e = press(0x4117, 0); assert(pad(&e)); shift = 0;
-    assert(!rmx_hold && rmx_pad_roll[0] == 0);
-
-    /* SOURCE MST sends deck pads to the master roll. */
-    rmx_cycle_source(1); rmx_cycle_source(1);
-    assert(rmx_source == RMX_SOURCE_MASTER);
-    e = press(0x411a, 1); assert(pad(&e) && rmx_pad_roll[1] == 3);
-    e = lift(0x411a, 1); assert(pad(&e));
-    rmx_cycle_source(1);
-    assert(rmx_source == RMX_SOURCE_CH1);
-
-    /* The loop: SHIFT + pad 2 records one beat of deck 1 (division 1 beat). */
-    rmx_set_division(4);
-    shift = 1; e = press(0x4118, 0); assert(pad(&e)); shift = 0;
-    unsigned beat = rmx_frames_for(0, 4), played = 0;
-    float loudest = 0;
-    for (unsigned b = 0; b < 200; b++) {
-        tone(in, 512, t, 330.0f); memcpy(out, in, sizeof(in)); run_deck(0, out, 512); t += 512;
-        memset(bus, 0, sizeof(bus)); master(bus, 512);
-        if (rmx_loop.shown_state == FX_LOOP_PLAY) {
-            played += 512;
-            for (unsigned i = 0; i < 512; i++) if (fx_absf(bus[i].left) > loudest) loudest = fx_absf(bus[i].left);
-        }
+    row->strip(0, RMX_W_STRIP + 0, 1); row->strip(0, RMX_W_STRIP + 0, 0);
+    assert(rmx_strip_effect == 2 && rmx_xpad.repeat_word != 0);
+    unsigned hits = 0; float newest = 1e9f;
+    for (unsigned b = 0; b < 80; b++) {
+        master_block();
+        /* A retrigger shows as the youngest kick voice starting over. */
+        float young = 1e9f;
+        for (unsigned v = 0; v < FX_XPAD_VOICES; v++)
+            if (rmx_xpad.voices[v].active && rmx_xpad.voices[v].sound == 0 && rmx_xpad.voices[v].fade == 0.0f &&
+                rmx_xpad.voices[v].position < young) young = rmx_xpad.voices[v].position;
+        if (young < newest) hits++;
+        newest = young;
     }
-    assert(beat == 20672 && played > beat);
-    assert(loudest > 0.05f);       /* the bus carries the loop on its own */
-    /* OVERDUB on for a while and off: one layer. UNDO takes it back. */
-    shift = 1; e = press(0x4119, 0); assert(pad(&e)); shift = 0;
-    for (unsigned b = 0; b < 30; b++) {
-        tone(in, 512, t, 550.0f); memcpy(out, in, sizeof(in)); run_deck(0, out, 512); t += 512;
-        memset(bus, 0, sizeof(bus)); master(bus, 512);
-    }
-    assert(rmx_loop.shown_overdub);
-    shift = 1; e = press(0x4119, 0); assert(pad(&e)); shift = 0;
-    for (unsigned b = 0; b < 4; b++) { memset(bus, 0, sizeof(bus)); master(bus, 512); }
-    assert(rmx_loop.shown_layers == 1 && !rmx_loop.shown_overdub);
-    shift = 1; e = press(0x411a, 0); assert(pad(&e)); shift = 0;
-    for (unsigned b = 0; b < 4; b++) { memset(bus, 0, sizeof(bus)); master(bus, 512); }
-    assert(rmx_loop.shown_layers == 0);
-    /* The panel says CLEAR once only the base is left; CLEAR empties. */
-    assert(row->caption(0, RMX_W_BACK, 0)[0] == 'C');
-    shift = 1; e = press(0x411b, 0); assert(pad(&e)); shift = 0;
-    for (unsigned b = 0; b < 4; b++) { memset(bus, 0, sizeof(bus)); master(bus, 512); }
-    assert(rmx_loop.shown_state == FX_LOOP_EMPTY);
-    memset(bus, 0, sizeof(bus)); master(bus, 512);
-    for (unsigned i = 0; i < 512; i++) assert(bus[i].left == 0.0f);
+    assert(rmx_xpad.repeat_interval == rmx_frames_of_beats(0.125f));
+    assert(hits >= 12);                    /* 80 blocks of 512 hold 15 eighths at 128 BPM */
+    /* HOLD off stops it. */
+    e = press(0x411c, 0); assert(pad(&e)); e = lift(0x411c, 0); assert(pad(&e));
+    assert(!rmx_hold && !rmx_strip_effect && rmx_xpad.repeat_word == 0);
 
-    /* A release taken after the panel closed still lets go. */
+    /* OVERDUB from the pads: standby, the first hit starts it, a track per sound. */
+    e = press(0x411d, 0); assert(pad(&e)); e = lift(0x411d, 0); assert(pad(&e));
+    master_block(); assert(rmx_xpad.shown_state == FX_PATTERN_STANDBY);
+    struct rx3_light l = {RX3_LIGHT_NATIVE, 0};
+    light(0, 6, &l); assert(l.state == RX3_LIGHT_BLINK);
+    e = press(0x4117, 0); assert(pad(&e));            /* KICK */
+    for (unsigned b = 0; b < 30; b++) master_block();
+    assert(rmx_xpad.shown_state == FX_PATTERN_RUN && (rmx_xpad.shown_tracks & 1u));
+    assert(rmx_xpad.length == rmx_frames_of_beats(4.0f));
+    l.state = RX3_LIGHT_NATIVE; light(0, 6, &l); assert(l.state == RX3_LIGHT_ON);
+    /* HOLD + KICK mutes the kick's track and does not toggle HOLD. */
     e = press(0x411c, 0); assert(pad(&e));
+    e = press(0x4117, 0); assert(pad(&e));
+    e = lift(0x411c, 0); assert(pad(&e));
+    assert(!rmx_hold && (rmx_xpad.muted & 1u));
+    l.state = RX3_LIGHT_NATIVE; light(0, 0, &l); assert(l.state == RX3_LIGHT_BLINK);
+    /* OVERDUB + KICK deletes it and leaves the loop running. */
+    e = press(0x411d, 0); assert(pad(&e));
+    e = press(0x4117, 0); assert(pad(&e));
+    e = lift(0x411d, 0); assert(pad(&e));
+    for (unsigned b = 0; b < 60; b++) master_block();
+    assert(rmx_xpad.shown_state == FX_PATTERN_RUN && !(rmx_xpad.shown_tracks & 1u));
+    /* OVERDUB alone stops and deletes it all. */
+    e = press(0x411d, 0); assert(pad(&e)); e = lift(0x411d, 0); assert(pad(&e));
+    master_block(); assert(rmx_xpad.shown_state == FX_PATTERN_OFF);
+
+    /* SOURCE (pad 8) to CH2 and MST; ROLL's caption follows. */
+    e = press(0x411e, 1); assert(pad(&e)); assert(rmx_source == RMX_SOURCE_CH2);
+    e = press(0x411e, 1); assert(pad(&e)); assert(rmx_source == RMX_SOURCE_MASTER);
+    c = row->caption(0, RMX_W_PICK, 0); assert(c[5] == 'M');
+    /* PITCH: SHIFT + 7 up, the slider, a tap back to 0; it reaches the rolls. */
+    shift = 1; e = press(0x411d, 0); assert(pad(&e)); shift = 0;
+    assert(rmx_semitones == 1 && rmx_rolls[2].pitch_cents == 100 && rmx_xpad.pitch_cents == 100);
+    row->slider_set(0, RMX_W_PITCH, 5, 1); assert(rmx_semitones == -7);
+    c = row->caption(0, RMX_W_PITCH, 0); assert(c[6] == '-' && c[7] == '7');
+    row->fire(0, RMX_W_PITCH, 0); assert(rmx_semitones == 0);
+    /* VOL: the slider sets it, a tap mutes. */
+    row->slider_set(0, RMX_W_VOLUME, 50, 1); assert(rmx_xpad.volume_permille == 500);
+    row->fire(0, RMX_W_VOLUME, 0); assert(rmx_xpad.volume_permille == 0);
+    c = row->caption(0, RMX_W_VOLUME, 0); assert(c[0] == 'M');
+    /* SHIFT on landing plays the strip an octave finer. */
+    rmx_cycle_source();                                       /* back to CH1 */
+    row->fire(0, RMX_W_PICK, 0);
+    shift = 1; row->strip(0, RMX_W_STRIP, 1); shift = 0;
+    assert(rmx_section_fine && (rmx_rolls[0].request & FX_ROLL_LENGTH_MASK) == rmx_frames_of_beats(0.0625f));
+    c = row->caption(0, RMX_W_STRIP, 0); assert(c[2] == '1' && c[3] == '6');
+    row->strip(0, RMX_W_STRIP, 0);
+
+    /* Off the panel the pads belong to the player. */
     row->activate(0);
-    e = lift(0x411c, 0); assert(pad(&e) && rmx_pad_roll[0] == 0);
-    e = press(0x411c, 0); assert(!pad(&e));
-
+    e = press(0x4117, 0); assert(!pad(&e));
     rx3_rmx_module.stop();
-    assert(deck_count == 0 && !master && !row && unregisters == 1);
+    assert(deck_count == 0 && !master && !row);
 
-    /* A player whose accessor differs is refused; too little memory steps
-       aside without refusing the runtime. */
     static const uint8_t other[8] = {0};
     rmx_bpm_prologue = other;
     assert(rx3_rmx_module.start(&services) == 0);
@@ -341,7 +359,7 @@ module_export(){{ printf 'EXPORT %s=%s\\n' "$1" "$2"; return 1; }}
             self.assertFalse((usb / 'injected').exists())
             return result.stdout
 
-    def test_roll_loop_prepare_stages_its_slots_and_honours_its_switch(self):
+    def test_rmx_prepare_stages_its_slots_and_honours_its_switch(self):
         out = self.run_prepare('rmx-looper', 'rmx_looper_prepare')
         for slot in ('11', '12', '13', '14', '15'):
             self.assertIn(f'STAGE rmx-looper {slot} ', out)

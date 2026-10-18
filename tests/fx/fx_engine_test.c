@@ -8,7 +8,8 @@
 #include <string.h>
 #include <math.h>
 #include <time.h>
-#include "../../mod/modules/core/api/rx3_fx_rmx.h"
+#include "../../mod/modules/core/api/rx3_fx_xpad.h"
+#include "../../mod/modules/core/api/rx3_fx_bands.h"
 
 #define RATE 44100.0f
 static int failures;
@@ -129,150 +130,12 @@ static void test_roll(void)
     free(buffer); free(in); free(out);
 }
 
-static void loop_run(struct fx_loop *loop, const struct fx_frame *source, struct fx_frame *out,
-                     unsigned int frames, unsigned int block)
-{
-    for (unsigned int at = 0; at < frames; at += block)
-        fx_loop_process(loop, source + at, out + at, frames - at < block ? frames - at : block);
-}
-
 static void noise(struct fx_frame *out, unsigned int frames, unsigned int seed, float amp)
 {
     for (unsigned int i = 0; i < frames; i++) {
         out[i].left = fx_noise(&seed) * amp;
         out[i].right = fx_noise(&seed) * amp;
     }
-}
-
-static void test_loop(void)
-{
-    unsigned int capacity = fx_rmx_capacity(RATE);
-    struct fx_frame *base = calloc(capacity, sizeof(*base));
-    struct fx_frame *slots[FX_LOOP_SLOTS];
-    for (unsigned int i = 0; i < FX_LOOP_SLOTS; i++) slots[i] = calloc(capacity, sizeof(*base));
-    static struct fx_loop loop;
-    fx_loop_init(&loop, base, slots, capacity);
-    fx_loop_set_level(&loop, 1000u);
-    loop.level = 1.0f;
-
-    unsigned int length = (unsigned int)(RATE * 60.0f / 120.0f);   /* one beat at 120 */
-    unsigned int total = length * 20u;
-    struct fx_frame *a = malloc(total * sizeof(*a)), *b = calloc(total, sizeof(*b));
-    struct fx_frame *out = calloc(total, sizeof(*out)), *silence = calloc(total, sizeof(*out));
-    noise(a, total, 7u, 0.3f);
-
-    fx_loop_command(&loop, FX_LOOP_CMD_RECORD, length);
-    loop_run(&loop, a, out, length + FX_RMX_SEAM, 256u);
-    CHECK(loop.state == FX_LOOP_PLAY, "loop: not playing after one pass");
-    /* Two clean passes from silence: the loop alone. */
-    memset(out, 0, total * sizeof(*out));
-    loop_run(&loop, silence, out, length * 2u, 256u);
-    float worst = 0.0f;
-    unsigned int offset = length - FX_RMX_SEAM;   /* where the playback cursor was */
-    for (unsigned int t = 0; t < length * 2u; t++) {
-        unsigned int at = (t + FX_RMX_SEAM) % length;
-        if (at < FX_RMX_SEAM) continue;           /* the blended head */
-        float d = fabsf(out[t].left - a[at].left);
-        if (d > worst) worst = d;
-    }
-    (void)offset;
-    CHECK(worst < 1e-4f, "loop: playback is not the recorded audio (%g)", worst);
-    printf("loop: playback reproduces the captured beat, worst %.2g\n", worst);
-
-    /* Overdub one exact pass of a second signal. */
-    noise(b, total, 99u, 0.2f);
-    fx_loop_command(&loop, FX_LOOP_CMD_OVERDUB_ON, 0u);
-    memset(out, 0, total * sizeof(*out));
-    loop_run(&loop, b, out, length, 64u);
-    fx_loop_command(&loop, FX_LOOP_CMD_OVERDUB_OFF, 0u);
-    loop_run(&loop, silence, out, 512u, 64u);
-    CHECK(loop.shown_layers == 1u, "loop: expected one layer, have %u", loop.shown_layers);
-    memset(out, 0, total * sizeof(*out));
-    unsigned int start = loop.position;
-    loop_run(&loop, silence, out, length, 256u);
-    float with_layer = rms(out, length);
-    printf("loop: after one overdub, %u layer(s), level %.3f\n", loop.shown_layers, with_layer);
-
-    fx_loop_command(&loop, FX_LOOP_CMD_UNDO, 0u);
-    loop_run(&loop, silence, out, 2048u, 256u);
-    CHECK(loop.shown_layers == 0u, "loop: undo left %u layer(s)", loop.shown_layers);
-    memset(out, 0, total * sizeof(*out));
-    start = loop.position;
-    loop_run(&loop, silence, out, length, 256u);
-    worst = 0.0f;
-    for (unsigned int t = 0; t < length; t++) {
-        unsigned int at = (start + t) % length;
-        if (at < FX_RMX_SEAM) continue;
-        float d = fabsf(out[t].left - a[at].left);
-        if (d > worst) worst = d;
-    }
-    CHECK(worst < 1e-4f, "loop: undo did not restore the base (%g)", worst);
-    CHECK(with_layer > rms(out, length) * 1.1f, "loop: the overdub was not audible");
-    printf("loop: undo restores the base exactly, worst %.2g\n", worst);
-
-    /* Six sessions: more than the undo depth, so the oldest are merged. The
-       total must be the base plus every layer, merge or no merge. */
-    double expected_energy_gain = 0;
-    for (unsigned int session = 0; session < 6u; session++) {
-        fx_loop_command(&loop, FX_LOOP_CMD_OVERDUB_ON, 0u);
-        loop_run(&loop, b, out, length, 512u);
-        fx_loop_command(&loop, FX_LOOP_CMD_OVERDUB_OFF, 0u);
-        loop_run(&loop, silence, out, length * 2u, 512u);
-        expected_energy_gain += 1;
-    }
-    for (unsigned int i = 0; i < 64u && loop.merging; i++) loop_run(&loop, silence, out, 512u, 512u);
-    CHECK(!loop.merging, "loop: merge never finished");
-    CHECK(loop.shown_layers <= FX_LOOP_LAYERS, "loop: %u layers exceed the undo depth", loop.shown_layers);
-    memset(out, 0, total * sizeof(*out));
-    start = loop.position;
-    loop_run(&loop, silence, out, length, 256u);
-    /* Every session overdubbed the same `b` from the same phase relation? No:
-       each started where the cursor was. Check the sum frame by frame using
-       the engine's own buffers instead: base plus layers equals the output. */
-    worst = 0.0f;
-    for (unsigned int t = 0; t < length; t++) {
-        unsigned int at = (start + t) % length;
-        float sum = base[at].left;
-        for (unsigned int n = 0; n < loop.depth; n++) {
-            struct fx_loop_slot *slot = &loop.slot[loop.stack[n]];
-            if (fx_loop_in_range(&loop, slot, at)) sum += slot->frames[at].left * slot->gain;
-        }
-        float d = fabsf(out[t].left - sum);
-        if (d > worst) worst = d;
-    }
-    CHECK(worst < 1e-4f, "loop: output differs from its layers (%g)", worst);
-    printf("loop: six overdubs, %u undoable layers, merged remainder consistent (worst %.2g)\n",
-           loop.shown_layers, worst);
-    (void)expected_energy_gain;
-
-    /* Overdub on a sine: the session edges must not click. */
-    struct fx_frame *s = malloc(total * sizeof(*s));
-    sine(s, total, 220.0f, 0.4f, 0);
-    fx_loop_init(&loop, base, slots, capacity);
-    fx_loop_set_level(&loop, 1000u);
-    loop.level = 1.0f;
-    fx_loop_command(&loop, FX_LOOP_CMD_RECORD, length);
-    memset(out, 0, total * sizeof(*out));
-    loop_run(&loop, s, out, length + FX_RMX_SEAM, 128u);
-    fx_loop_command(&loop, FX_LOOP_CMD_OVERDUB_ON, 0u);
-    loop_run(&loop, s + length, out, length / 3u, 128u);
-    fx_loop_command(&loop, FX_LOOP_CMD_OVERDUB_OFF, 0u);
-    /* The source keeps playing while the session fades out, as a deck does. */
-    loop_run(&loop, s + length + length / 3u, out, 1024u, 128u);
-    memset(out, 0, total * sizeof(*out));
-    loop_run(&loop, silence, out, length * 3u, 128u);
-    float step = max_step(out, length * 3u);
-    CHECK(step < 0.05f, "loop: overdub edge or seam clicks (%g)", step);
-    printf("loop: seam and overdub edges on a sine, largest step %.4f\n", step);
-
-    fx_loop_command(&loop, FX_LOOP_CMD_CLEAR, 0u);
-    loop_run(&loop, silence, out, 2048u, 128u);
-    memset(out, 0, total * sizeof(*out));
-    loop_run(&loop, silence, out, length, 128u);
-    CHECK(loop.state == FX_LOOP_EMPTY && rms(out, length) == 0.0f, "loop: clear left sound");
-    printf("loop: clear silences and empties\n");
-    free(s); free(a); free(b); free(out); free(silence); free(base);
-    for (unsigned int i = 0; i < FX_LOOP_SLOTS; i++) free(slots[i]);
 }
 
 static float tone_gain(unsigned int kind, float color, float param, float hz)
@@ -391,13 +254,270 @@ static void test_color(void)
     free(x); free(y);
 }
 
-/* Host cost of the bus engines while they work hardest: a roll repeating, a
-   loop playing four layers while it overdubs a fifth. */
-static void cost_bus(void)
+/* PITCH on a roll keeps its period in time and moves the pitch inside it. */
+static void test_roll_pitch(void)
 {
-    unsigned int capacity = fx_rmx_capacity(RATE), frames = 689u * 256u;   /* whole blocks */
+    unsigned int capacity = fx_rmx_capacity(RATE);
     struct fx_frame *buffer = calloc(capacity, sizeof(*buffer));
-    struct fx_frame *x = malloc(frames * sizeof(*x)), *y = calloc(frames, sizeof(*y));
+    static struct fx_roll roll;
+    fx_roll_init(&roll, buffer, capacity);
+    unsigned int total = (unsigned int)RATE * 2u, length = 11025u;   /* half a beat at 120 */
+    struct fx_frame *x = malloc(total * sizeof(*x));
+    sine(x, total, 440.0f, 0.5f, 0);
+    fx_roll_pitch(&roll, -1200);
+    fx_roll_set(&roll, length, 1u);
+    roll_run(&roll, x, total, 256u);
+    unsigned int from = length * 2u;
+    float worst = 0.0f;
+    for (unsigned int t = from; t + length < total; t++) {
+        float d = fabsf(x[t].left - x[t + length].left);
+        if (d > worst) worst = d;
+    }
+    CHECK(worst < 1e-5f, "roll pitch: the period moved (%g)", worst);
+    /* An octave down: zero crossings at half the rate, away from the edges. */
+    unsigned int crossings = 0u;
+    for (unsigned int t = from + 128u; t < from + length - 128u; t++)
+        if ((x[t - 1].left < 0.0f) != (x[t].left < 0.0f)) crossings++;
+    float hz = (float)crossings * 0.5f * RATE / (float)(length - 256u);
+    CHECK(hz > 210.0f && hz < 230.0f, "roll pitch: -12 gives %.1f Hz, not 220", hz);
+    printf("roll: pitch -12 keeps the half-beat period, plays at %.1f Hz\n", hz);
+    free(buffer); free(x);
+}
+
+/* The crossover's bands sum to an allpass: flat in level, and each band
+   holds the tones it should. */
+static void test_bands(void)
+{
+    unsigned int frames = (unsigned int)RATE;
+    struct fx_frame *x = malloc(frames * sizeof(*x));
+    static const float tones[3] = {80.0f, 900.0f, 9000.0f};
+    for (unsigned int tone = 0; tone < 3u; tone++) {
+        struct fx_bands bands;
+        fx_bands_init(&bands, RATE);
+        sine(x, frames, tones[tone], 0.5f, 0);
+        double e[3] = {0, 0, 0}, sum = 0, in = 0;
+        for (unsigned int i = 0; i < frames; i++) {
+            struct fx_band_frame b;
+            fx_bands_split(&bands, x[i], &b);
+            if (i < frames / 2u) continue;
+            e[0] += b.low.left * b.low.left; e[1] += b.mid.left * b.mid.left; e[2] += b.high.left * b.high.left;
+            float s = b.low.left + b.mid.left + b.high.left;
+            sum += s * s; in += x[i].left * x[i].left;
+        }
+        float flat = 10.0f * log10f((float)(sum / in));
+        float own = 10.0f * log10f((float)(e[tone] / in));
+        CHECK(fabsf(flat) < 0.05f, "bands: %g Hz sums to %.2f dB", tones[tone], flat);
+        CHECK(own > -1.5f, "bands: %g Hz only %.1f dB in its band", tones[tone], own);
+        for (unsigned int other = 0; other < 3u; other++) {
+            if (other == tone) continue;
+            float leak = 10.0f * log10f((float)(e[other] / in) + 1e-12f);
+            CHECK(leak < -12.0f, "bands: %g Hz leaks %.1f dB into band %u", tones[tone], leak, other);
+        }
+        printf("bands: %5.0f Hz sum %+.3f dB, in its own band %.2f dB\n", tones[tone], flat, own);
+    }
+    free(x);
+}
+
+static void identity(void *c, struct fx_frame *io, unsigned int n) { (void)c; (void)io; (void)n; }
+static void silence_effect(void *c, struct fx_frame *io, unsigned int n)
+{ (void)c; for (unsigned int i = 0; i < n; i++) io[i].left = io[i].right = 0.0f; }
+
+/* An effect limited to some bands: bit-exact with all of them, a smooth
+   change of path, and only the chosen bands touched. */
+static void test_band_insert(void)
+{
+    unsigned int frames = (unsigned int)RATE;
+    struct fx_frame *x = malloc(frames * sizeof(*x)), *y = malloc(frames * sizeof(*y));
+    static struct fx_band_insert insert;
+    fx_band_insert_init(&insert, RATE);
+    for (unsigned int i = 0; i < frames; i++) {
+        float t = (float)i / RATE;
+        x[i].left = x[i].right = 0.4f * sinf(6.2831853f * 80.0f * t) + 0.2f * sinf(6.2831853f * 9000.0f * t);
+    }
+    memcpy(y, x, frames * sizeof(*x));
+    unsigned int half = frames / 2u;
+    for (unsigned int at = 0; at < half; at += 300u)
+        fx_band_insert_process(&insert, y + at, half - at < 300u ? half - at : 300u, 7u, 1, identity, 0);
+    CHECK(!memcmp(x, y, half * sizeof(*x)), "band insert: all bands is not bit-exact");
+    /* Now only HIGH, still idle: a crossfade to the allpass, no step. */
+    for (unsigned int at = half; at < frames; at += 300u)
+        fx_band_insert_process(&insert, y + at, frames - at < 300u ? frames - at : 300u, 4u, 1, identity, 0);
+    float own = max_step(x, frames), step = max_step(y, frames);
+    CHECK(step < own * 1.2f, "band insert: path change clicks (%g against %g)", step, own);
+    /* An effect that silences its input, on HIGH only: the 9 kHz goes, 80 Hz stays. */
+    memcpy(y, x, frames * sizeof(*x));
+    for (unsigned int at = 0; at < frames; at += 256u)
+        fx_band_insert_process(&insert, y + at, frames - at < 256u ? frames - at : 256u, 4u, 0, silence_effect, 0);
+    double hi = 0, lo = 0;
+    struct fx_bands probe; fx_bands_init(&probe, RATE);
+    for (unsigned int i = 0; i < frames; i++) {
+        struct fx_band_frame b; fx_bands_split(&probe, y[i], &b);
+        if (i < frames / 2u) continue;
+        hi += b.high.left * b.high.left; lo += b.low.left * b.low.left;
+    }
+    float lo_db = 10.0f * log10f((float)(lo / (frames / 2u)) / (0.4f * 0.4f * 0.5f));
+    float hi_db = 10.0f * log10f((float)(hi / (frames / 2u)) / (0.2f * 0.2f * 0.5f) + 1e-12f);
+    CHECK(lo_db > -0.5f && hi_db < -40.0f, "band insert: low %.1f dB, high %.1f dB", lo_db, hi_db);
+    printf("bands: effect on HIGH only: 80 Hz %.2f dB, 9 kHz %.1f dB; all bands bit-exact; path change step %.4f\n",
+           lo_db, hi_db, step);
+    free(x); free(y);
+}
+
+static void xpad_run(struct fx_xpad *pad, const struct fx_frame *roll, struct fx_frame *bus,
+                     unsigned int frames, unsigned int block)
+{
+    for (unsigned int at = 0; at < frames; at += block)
+        fx_xpad_process(pad, roll ? roll + at : 0, bus + at, frames - at < block ? frames - at : block);
+}
+
+static void test_xpad(void)
+{
+    unsigned int capacity = fx_xpad_pattern_capacity(RATE), synth = fx_xpad_synth_frames(RATE);
+    struct fx_frame *tracks[FX_XPAD_TRACKS], *sounds[FX_XPAD_SOUNDS];
+    for (unsigned int t = 0; t < FX_XPAD_TRACKS; t++) tracks[t] = calloc(capacity, sizeof(struct fx_frame));
+    static struct fx_xpad pad;
+    fx_xpad_init(&pad, RATE, tracks, capacity);
+    fx_xpad_volume(&pad, 1000u);
+    pad.level = 1.0f;
+    static const char *names[] = {"KICK", "SNARE", "CLAP", "HI HAT"};
+    for (unsigned int s = 0; s < FX_XPAD_SOUNDS; s++) {
+        sounds[s] = calloc(synth, sizeof(struct fx_frame));
+        unsigned int length = fx_xpad_synthesize(s, sounds[s], synth, RATE);
+        float peak = 0.0f;
+        for (unsigned int i = 0; i < length; i++) if (fabsf(sounds[s][i].left) > peak) peak = fabsf(sounds[s][i].left);
+        CHECK(length > 4000u && fabsf(peak - 0.7f) < 0.01f, "%s: length %u peak %g", names[s], length, peak);
+        CHECK(fabsf(sounds[s][length - 1u].left) < 0.02f, "%s: ends on a step", names[s]);
+        fx_xpad_set_sound(&pad, s, sounds[s], length, RATE);
+    }
+    /* Where each sound's energy is: the kick low, the hat high. */
+    {
+        struct fx_bands bands;
+        double kick_low = 0, kick_all = 0, hat_high = 0, hat_all = 0;
+        fx_bands_init(&bands, RATE);
+        for (unsigned int i = 0; i < synth; i++) {
+            struct fx_band_frame b; fx_bands_split(&bands, sounds[FX_XPAD_KICK][i], &b);
+            kick_low += b.low.left * b.low.left; kick_all += sounds[0][i].left * sounds[0][i].left;
+        }
+        fx_bands_init(&bands, RATE);
+        for (unsigned int i = 0; i < synth; i++) {
+            struct fx_band_frame b; fx_bands_split(&bands, sounds[FX_XPAD_HAT][i], &b);
+            hat_high += b.high.left * b.high.left; hat_all += sounds[3][i].left * sounds[3][i].left;
+        }
+        CHECK(kick_low / kick_all > 0.8, "KICK: only %.0f%% below 250 Hz", 100.0 * kick_low / kick_all);
+        CHECK(hat_high / hat_all > 0.8, "HI HAT: only %.0f%% above 2.5 kHz", 100.0 * hat_high / hat_all);
+        printf("xpad: KICK %.0f%% of its energy below 250 Hz, HI HAT %.0f%% above 2.5 kHz\n",
+               100.0 * kick_low / kick_all, 100.0 * hat_high / hat_all);
+    }
+
+    unsigned int total = (unsigned int)RATE * 6u;
+    struct fx_frame *bus = calloc(total, sizeof(*bus));
+    /* A hit sounds at once, then is silent. */
+    fx_xpad_hit(&pad, FX_XPAD_SNARE);
+    xpad_run(&pad, 0, bus, 22050u, 256u);
+    CHECK(fabsf(bus[10].left) > 0.0f && rms(bus + 18000u, 2000u) == 0.0f, "xpad: a hit does not ring once");
+
+    /* The strip repeats a sound at its division, struck on the frame. */
+    memset(bus, 0, total * sizeof(*bus));
+    unsigned int interval = 5512u;                       /* 1/4 beat at 120 */
+    fx_xpad_repeat(&pad, FX_XPAD_KICK, interval);
+    xpad_run(&pad, 0, bus, interval * 6u, 333u);
+    fx_xpad_repeat(&pad, FX_XPAD_KICK, 0u);
+    unsigned int onsets = 0u, last = 0u, misplaced = 0u;
+    for (unsigned int i = 1; i < interval * 6u; i++)
+        if (bus[i - 1].left == 0.0f && bus[i].left != 0.0f) {
+            if (onsets && (i - last) % interval) misplaced++;
+            onsets++; last = i;
+        }
+    float step = max_step(bus, interval * 6u);
+    CHECK(onsets == 1u || misplaced == 0u, "xpad: repeats off their frame");
+    /* The kick's own attack is a click on purpose; a choke may not add one
+       larger than it. */
+    float own = max_step(sounds[FX_XPAD_KICK], synth);
+    CHECK(step <= own * 1.05f, "xpad: repeat choke clicks (%g against the kick's own %g)", step, own);
+    printf("xpad: KICK repeated every %u frames across odd blocks, largest step %.3f (its own attack %.3f)\n",
+           interval, step, own);
+
+    /* PITCH: an octave up plays the hat twice as fast. */
+    memset(bus, 0, total * sizeof(*bus));
+    fx_xpad_pitch(&pad, 1200);
+    fx_xpad_hit(&pad, FX_XPAD_CLAP);
+    xpad_run(&pad, 0, bus, 22050u, 256u);
+    unsigned int heard = 0u;
+    for (unsigned int i = 0; i < 22050u; i++) if (bus[i].left != 0.0f) heard = i;
+    fx_xpad_pitch(&pad, 0);
+    CHECK(heard < synth / 2u + 64u, "xpad: pitch +12 lasted %u frames", heard);
+
+    /* OVERDUB: standby, the first hit starts a four-beat loop, sounds are
+       recorded per track, a muted track drops out, a deleted one goes. */
+    unsigned int beats4 = 88200u;                         /* four beats at 120 */
+    for (unsigned int t = 0; t < FX_XPAD_TRACKS; t++) memset(tracks[t], 0, capacity * sizeof(struct fx_frame));
+    fx_xpad_init(&pad, RATE, tracks, capacity);
+    fx_xpad_volume(&pad, 1000u); pad.level = 1.0f;
+    for (unsigned int s = 0; s < FX_XPAD_SOUNDS; s++) fx_xpad_set_sound(&pad, s, sounds[s], synth, RATE);
+    fx_xpad_overdub(&pad, beats4);
+    memset(bus, 0, total * sizeof(*bus));
+    xpad_run(&pad, 0, bus, 4096u, 256u);
+    CHECK(pad.shown_state == FX_PATTERN_STANDBY && rms(bus, 4096u) == 0.0f, "xpad: overdub did not stand by");
+    fx_xpad_hit(&pad, FX_XPAD_KICK);
+    xpad_run(&pad, 0, bus, 20000u, 256u);
+    CHECK(pad.shown_state == FX_PATTERN_RUN && pad.position == 20000u, "xpad: the first hit did not start the loop");
+    fx_xpad_hit(&pad, FX_XPAD_HAT);
+    xpad_run(&pad, 0, bus, beats4 - 20000u, 256u);
+    CHECK(pad.shown_tracks == ((1u << FX_XPAD_KICK) | (1u << FX_XPAD_HAT)), "xpad: tracks %x", pad.shown_tracks);
+    /* The next pass plays both back with nothing pressed. */
+    memset(bus, 0, total * sizeof(*bus));
+    xpad_run(&pad, 0, bus, beats4, 512u);
+    float kick = rms(bus, 4000u), hat = rms(bus + 20000u, 4000u);
+    CHECK(kick > 0.05f && hat > 0.02f, "xpad: loop did not play back (%g, %g)", kick, hat);
+    /* Mute the kick: gone; unmute: back. Delete the hat: gone for good. */
+    fx_xpad_toggle_mute(&pad, FX_XPAD_KICK);
+    memset(bus, 0, total * sizeof(*bus));
+    xpad_run(&pad, 0, bus, beats4, 512u);
+    CHECK(rms(bus, 4000u) < 1e-6f && rms(bus + 20000u, 4000u) > 0.02f, "xpad: mute is not per track");
+    fx_xpad_toggle_mute(&pad, FX_XPAD_KICK);
+    fx_xpad_delete(&pad, FX_XPAD_HAT);
+    xpad_run(&pad, 0, bus, 8192u * 30u, 512u);            /* let the clear finish */
+    memset(bus, 0, total * sizeof(*bus));
+    unsigned int phase = pad.position;
+    xpad_run(&pad, 0, bus, beats4, 512u);
+    unsigned int kick_at = (beats4 - phase) % beats4;
+    CHECK(rms(bus + kick_at, 4000u) > 0.05f, "xpad: the kick did not survive the delete");
+    CHECK(rms(bus + (kick_at + 20000u) % beats4, 4000u) < 1e-6f, "xpad: the hat was not deleted");
+    CHECK(pad.shown_tracks == (1u << FX_XPAD_KICK), "xpad: tracks after delete %x", pad.shown_tracks);
+    /* A roll overdubbed onto its own track. */
+    struct fx_frame *roll = malloc(beats4 * sizeof(*roll));
+    sine(roll, beats4, 330.0f, 0.3f, 0);
+    xpad_run(&pad, roll, bus, 8000u, 512u);
+    CHECK(pad.shown_tracks & (1u << FX_XPAD_ROLL_TRACK), "xpad: roll not recorded");
+    /* OVERDUB again: everything stops and goes. */
+    fx_xpad_overdub(&pad, beats4);
+    xpad_run(&pad, 0, bus, 8192u * 30u, 512u);
+    memset(bus, 0, total * sizeof(*bus));
+    xpad_run(&pad, 0, bus, beats4, 512u);
+    CHECK(pad.shown_state == FX_PATTERN_OFF && rms(bus, beats4) == 0.0f && !pad.shown_tracks,
+          "xpad: overdub off left sound");
+    printf("xpad: overdub stands by, starts on the first hit, keeps a track per sound, mutes, deletes, clears\n");
+
+    /* Host cost with the loop running five tracks and two voices. */
+    for (unsigned int t = 0; t < FX_XPAD_TRACKS; t++) for (unsigned int i = 0; i < capacity; i++) tracks[t][i].left = 0.1f;
+    fx_xpad_overdub(&pad, beats4); fx_xpad_hit(&pad, FX_XPAD_KICK); fx_xpad_hit(&pad, FX_XPAD_HAT);
+    xpad_run(&pad, 0, bus, 1024u, 256u);
+    for (unsigned int t = 0; t < FX_XPAD_TRACKS; t++) pad.written[t] = 1u;
+    fx_xpad_repeat(&pad, FX_XPAD_SNARE, 2756u);
+    clock_t begin = clock();
+    xpad_run(&pad, roll, bus, beats4, 256u);
+    printf("cost: X-PAD    %.1f ns per frame on this host (5 tracks, repeat, roll)\n",
+           (double)(clock() - begin) / CLOCKS_PER_SEC * 1e9 / beats4);
+    free(roll); free(bus);
+    for (unsigned int t = 0; t < FX_XPAD_TRACKS; t++) free(tracks[t]);
+    for (unsigned int s = 0; s < FX_XPAD_SOUNDS; s++) free(sounds[s]);
+}
+
+/* Host cost of a repeating roll, for comparison with the colour engines. */
+static void cost_roll(void)
+{
+    unsigned int capacity = fx_rmx_capacity(RATE), frames = 689u * 256u;
+    struct fx_frame *buffer = calloc(capacity, sizeof(*buffer)), *x = malloc(frames * sizeof(*x));
     noise(x, frames, 9u, 0.5f);
     static struct fx_roll roll;
     fx_roll_init(&roll, buffer, capacity);
@@ -406,33 +526,18 @@ static void cost_bus(void)
     for (unsigned int at = 0; at < frames; at += 256u) fx_roll_process(&roll, x + at, 256u);
     printf("cost: ROLL     %.1f ns per frame on this host\n",
            (double)(clock() - begin) / CLOCKS_PER_SEC * 1e9 / frames);
-    struct fx_frame *base = calloc(capacity, sizeof(*base)), *slots[FX_LOOP_SLOTS];
-    for (unsigned int i = 0; i < FX_LOOP_SLOTS; i++) slots[i] = calloc(capacity, sizeof(*base));
-    static struct fx_loop loop;
-    fx_loop_init(&loop, base, slots, capacity);
-    fx_loop_command(&loop, FX_LOOP_CMD_RECORD, 20000u);
-    for (unsigned int at = 0; at < 20000u + FX_RMX_SEAM; at += 256u) fx_loop_process(&loop, x + at, y + at, 256u);
-    for (unsigned int layer = 0; layer < 4u; layer++) {
-        fx_loop_command(&loop, FX_LOOP_CMD_OVERDUB_ON, 0u);
-        for (unsigned int at = 0; at < 20480u; at += 256u) fx_loop_process(&loop, x + at, y + at, 256u);
-        fx_loop_command(&loop, FX_LOOP_CMD_OVERDUB_OFF, 0u);
-        for (unsigned int at = 0; at < 2560u; at += 256u) fx_loop_process(&loop, x + at, y + at, 256u);
-    }
-    fx_loop_command(&loop, FX_LOOP_CMD_OVERDUB_ON, 0u);
-    begin = clock();
-    for (unsigned int at = 0; at < frames; at += 256u) fx_loop_process(&loop, x + at, y + at, 256u);
-    printf("cost: LOOP     %.1f ns per frame on this host (%u layers, overdubbing)\n",
-           (double)(clock() - begin) / CLOCKS_PER_SEC * 1e9 / frames, loop.shown_layers);
-    free(buffer); free(x); free(y); free(base);
-    for (unsigned int i = 0; i < FX_LOOP_SLOTS; i++) free(slots[i]);
+    free(buffer); free(x);
 }
 
 int main(void)
 {
     test_roll();
-    test_loop();
+    test_roll_pitch();
+    test_bands();
+    test_band_insert();
+    test_xpad();
     test_color();
-    cost_bus();
+    cost_roll();
     if (failures) { printf("%d check(s) failed\n", failures); return 1; }
     printf("all fx engine checks passed\n");
     return 0;
