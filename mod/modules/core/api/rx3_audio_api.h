@@ -2,13 +2,19 @@
 #ifndef RX3_AUDIO_API_H
 #define RX3_AUDIO_API_H
 #include "rx3_platform.h"
-/* Typed audio stages. Each stage has one owner at a time; a second claim
- * fails without replacing the first. Processing runs on the player's audio
- * threads and must not allocate, perform I/O or wait. The core counts callers
- * in flight: release() detaches the native hook, drains admitted callbacks
- * and only then returns, so it must not be called from a callback. Buffers
- * belong to the player and are valid only during the call.
+/* Typed audio stages. A stage carries up to RX3_AUDIO_CLIENTS clients, run
+ * in ascending priority on the same buffer, so each one hears what the ones
+ * before it made. An owner holds at most one place per stage; a claim beyond
+ * the limit, or a second claim by the same owner, fails without disturbing
+ * the others. claim_*() places a client at RX3_AUDIO_PRIORITY_DEFAULT.
+ * Processing runs on the player's audio threads and must not allocate,
+ * perform I/O or wait. The core counts callers in flight: release() takes the
+ * client out, drains admitted callbacks and only then returns, detaching the
+ * native hook with its last client, so it must not be called from a callback.
+ * Buffers belong to the player and are valid only during the call.
  */
+#define RX3_AUDIO_CLIENTS 4u
+#define RX3_AUDIO_PRIORITY_DEFAULT 50u
 struct rx3_stereo { float left, right; };
 
 /* A deck's playback stream after speed and master tempo (TimeStretch), the
@@ -25,6 +31,10 @@ struct rx3_audio_service {
     void (*release_deck_stream)(const void *owner);
     int (*claim_master)(const void *owner, rx3_master_fn);
     void (*release_master)(const void *owner);
+    /* API 19: the same stages at a chosen place in the chain. Equal
+       priorities run in the order they were claimed. */
+    int (*claim_deck_stream_at)(const void *owner, unsigned int priority, rx3_deck_stream_fn);
+    int (*claim_master_at)(const void *owner, unsigned int priority, rx3_master_fn);
 };
 extern const struct rx3_audio_service rx3_audio;
 #endif

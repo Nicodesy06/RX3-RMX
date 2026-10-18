@@ -258,10 +258,17 @@ static void deck_client(unsigned d, const void *r, int p, struct rx3_stereo *o, 
     o[0].left = 2;
 }
 static void master_client(struct rx3_stereo *o, unsigned n) { (void)n; o[0].left += 0.5f; }
-static const char owner = 0, other = 0;
+/* Chained clients see each other's work in priority order. */
+static void master_double(struct rx3_stereo *o, unsigned n) { (void)n; o[0].left *= 2.0f; }
+static void deck_after(unsigned d, const void *r, int p, struct rx3_stereo *o, unsigned n) {
+    (void)d; (void)r; (void)p; (void)n; assert(o[0].left == 2); o[0].left = 3;
+}
+static const char owner = 0, other = 0, third = 0, fourth = 0, fifth = 0;
 int main(void) {
     assert(rx3_audio.claim_deck_stream(&owner, deck_client));
-    assert(!rx3_audio.claim_deck_stream(&other, deck_client));
+    /* One place per owner and stage. */
+    assert(!rx3_audio.claim_deck_stream(&owner, deck_client));
+    assert(installed == 1);
     unsigned long (*stream)(void *, unsigned long, struct rx3_stereo *, unsigned long) = hooked(0x000c292cu);
     /* ARM32 layout: the reader pointer sits at byte 4 of TimeStretch. */
     int reader = 0; uint8_t stretch[16] = {0}; void *pointer = &reader; memcpy(stretch + 4, &pointer, sizeof(pointer));
@@ -270,15 +277,32 @@ int main(void) {
     stream(stretch, 44, out, 1); assert(deck_seen == 9 && out[0].left == 1);
     rx3_audio_track_loading(1); rx3_audio_track_loaded(1, &reader);
     stream(stretch, 44, out, 1); assert(deck_seen == 1 && position_seen == 44 && out[0].left == 2);
+    /* A later client on the same stage runs after the first, on its output,
+       and shares the one native hook. */
+    assert(rx3_audio.claim_deck_stream_at(&other, 60u, deck_after) && installed == 1);
+    stream(stretch, 44, out, 1); assert(out[0].left == 3);
+    rx3_audio.release_deck_stream(&other); assert(!detached);
+    stream(stretch, 44, out, 1); assert(out[0].left == 2);
     rx3_audio_track_loading(1); deck_seen = 9;
     stream(stretch, 44, out, 1); assert(deck_seen == 9);
-    /* The master client runs before the talkover attenuator. */
+    /* The master clients run before the talkover attenuator, lowest priority
+       first: 0 + 0.5, then doubled. */
     assert(rx3_audio.claim_master(&owner, master_client));
+    assert(rx3_audio.claim_master_at(&other, 70u, master_double));
     void (*talkover)(void *, void *, struct rx3_stereo *, int) = hooked(0x0009c750u);
-    out[0].left = 0; talkover(0, 0, out, 1); assert(seen_by_talkover == 0.5f);
-    /* Only the owner releases; release detaches, drains and frees. */
-    rx3_audio.release_master(&other); assert(!detached);
-    rx3_audio.release_master(&owner); assert(detached == 1 && released == 1);
+    out[0].left = 0; talkover(0, 0, out, 1); assert(seen_by_talkover == 1.0f);
+    /* Placed ahead by priority even though it was claimed last: doubled,
+       plus a half, doubled again. */
+    assert(rx3_audio.claim_master_at(&third, 10u, master_double));
+    out[0].left = 1; talkover(0, 0, out, 1); assert(seen_by_talkover == 5.0f);
+    assert(rx3_audio.claim_master_at(&fourth, 90u, master_client));
+    assert(!rx3_audio.claim_master_at(&fifth, 90u, master_client));   /* full */
+    rx3_audio.release_master(&third); rx3_audio.release_master(&fourth);
+    /* Only an owner releases its place; the last one detaches, drains and frees. */
+    rx3_audio.release_master(&fifth); assert(!detached);
+    rx3_audio.release_master(&owner); assert(!detached);
+    out[0].left = 1; talkover(0, 0, out, 1); assert(seen_by_talkover == 2.0f);
+    rx3_audio.release_master(&other); assert(detached == 1 && released == 1);
     rx3_audio.release_deck_stream(&owner); assert(detached == 2 && released == 2);
     assert(rx3_audio.claim_deck_stream(&other, deck_client) && installed == 3);
     return 0;

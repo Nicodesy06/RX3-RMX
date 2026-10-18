@@ -54,8 +54,12 @@ struct shared_hook {
 static struct pad_client pad_clients[CLIENT_LIMIT];
 static struct key_client key_clients[CLIENT_LIMIT];
 static unsigned int pad_client_count, key_client_count;
-static const void *slip_led_owner, *pad_led_owner, *mode_key_owners[CLIENT_LIMIT];
-static rx3_light_fn slip_light, pad_light;
+static const void *slip_led_owner, *mode_key_owners[CLIENT_LIMIT];
+static rx3_light_fn slip_light;
+/* The unit-wide refresh is shared: each owner answers only while it owns the
+   pads, and the first answer that is not NATIVE is the light. */
+static const void *pad_led_owners[CLIENT_LIMIT];
+static rx3_light_fn pad_lights[CLIENT_LIMIT];
 static volatile unsigned int blink_origin, blink_valid;
 static struct shared_hook pad_hook, key_hook, slip_led_hook, pad_led_hook, mode_key_hook;
 static void (*mode_key_action)(void);
@@ -235,10 +239,12 @@ static void pad_led_hooked(void *self, void *state)
 {
     enter(&pad_led_hook);
     ((led_refresh_fn)pad_led_hook.original)(self, state);
-    rx3_light_fn light_of = __atomic_load_n(&pad_light, __ATOMIC_SEQ_CST);
+    int any = 0;
+    for (unsigned int i = 0; i < CLIENT_LIMIT; i++)
+        if (__atomic_load_n(&pad_lights[i], __ATOMIC_SEQ_CST)) any = 1;
     uint8_t *entries;
     unsigned int count;
-    if (light_of && led_list(state, &entries, &count) && count) {
+    if (any && led_list(state, &entries, &count) && count) {
         unsigned int base = 1u;
         for (unsigned int i = 0; i < count; i++) {
             unsigned int id = *(const uint32_t *)(entries + i * LED_STRIDE);
@@ -252,7 +258,11 @@ static void pad_led_hooked(void *self, void *state)
             if (control == RX3_NO_DECK) continue;
             unsigned int channel = *(const uint32_t *)(led + 4u);
             struct rx3_light light = {RX3_LIGHT_NATIVE, 0u};
-            light_of(channel >= 1u && channel <= 2u ? channel - 1u : RX3_NO_DECK, control, &light);
+            unsigned int deck = channel >= 1u && channel <= 2u ? channel - 1u : RX3_NO_DECK;
+            for (unsigned int n = 0; n < CLIENT_LIMIT && light.state == RX3_LIGHT_NATIVE; n++) {
+                rx3_light_fn light_of = __atomic_load_n(&pad_lights[n], __ATOMIC_SEQ_CST);
+                if (light_of) light_of(deck, control, &light);
+            }
             if (light.state != RX3_LIGHT_NATIVE) apply_light(led, &light, 1);
         }
     }
@@ -320,11 +330,16 @@ static int register_lights(const void *owner, unsigned int refresh, rx3_light_fn
         __atomic_store_n(&slip_light, light, __ATOMIC_SEQ_CST);
         return 1;
     }
-    if (pad_led_owner ||
+    unsigned int free_slot = CLIENT_LIMIT;
+    for (unsigned int i = 0; i < CLIENT_LIMIT; i++) {
+        if (pad_led_owners[i] == owner) return 0;
+        if (!pad_led_owners[i] && free_slot == CLIENT_LIMIT) free_slot = i;
+    }
+    if (free_slot == CLIENT_LIMIT ||
         !acquire(&pad_led_hook, CHECK_LED_STAT, led_stat_guard, (void *)pad_led_hooked, 0))
         return 0;
-    pad_led_owner = owner;
-    __atomic_store_n(&pad_light, light, __ATOMIC_SEQ_CST);
+    pad_led_owners[free_slot] = owner;
+    __atomic_store_n(&pad_lights[free_slot], light, __ATOMIC_SEQ_CST);
     return 1;
 }
 
@@ -359,9 +374,13 @@ static void unregister_owner(const void *owner)
         __atomic_store_n(&slip_light, 0, __ATOMIC_SEQ_CST);
         slip_led_owner = 0;
     }
-    if (pad_led_owner == owner) {
-        __atomic_store_n(&pad_light, 0, __ATOMIC_SEQ_CST);
-        pad_led_owner = 0;
+    unsigned int pad_leds = 0;
+    for (unsigned int i = 0; i < CLIENT_LIMIT; i++) {
+        if (pad_led_owners[i] == owner) {
+            __atomic_store_n(&pad_lights[i], 0, __ATOMIC_SEQ_CST);
+            pad_led_owners[i] = 0;
+        }
+        if (pad_led_owners[i]) pad_leds++;
     }
     for (unsigned int i = 0; i < CLIENT_LIMIT; i++) {
         if (mode_key_owners[i] == owner) mode_key_owners[i] = 0;
@@ -374,7 +393,7 @@ static void unregister_owner(const void *owner)
     if (!pads) { relinquish(&pad_hook); if (!pad_hook.original) pad_client_count = 0; }
     if (!keys) { relinquish(&key_hook); if (!key_hook.original) key_client_count = 0; }
     if (!slip_led_owner) relinquish(&slip_led_hook);
-    if (!pad_led_owner) relinquish(&pad_led_hook);
+    if (!pad_leds) relinquish(&pad_led_hook);
     if (!modes) relinquish(&mode_key_hook);
 }
 
@@ -397,7 +416,9 @@ void rx3_input_trace_keys(unsigned int limit)
 
 unsigned int rx3_input_count(void)
 {
-    return pad_client_count + key_client_count + (slip_led_owner != 0) + (pad_led_owner != 0);
+    unsigned int pad_leds = 0;
+    for (unsigned int i = 0; i < CLIENT_LIMIT; i++) pad_leds += pad_led_owners[i] != 0;
+    return pad_client_count + key_client_count + (slip_led_owner != 0) + pad_leds;
 }
 
 const struct rx3_input_service rx3_input = {

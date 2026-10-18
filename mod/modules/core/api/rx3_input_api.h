@@ -46,17 +46,20 @@ typedef int (*rx3_key_handler)(const struct rx3_key_event *);
 #define RX3_LIGHT_SHIFT  8u
 struct rx3_light { unsigned int state; uint32_t rgb; /* 0xRRGGBB */ };
 typedef void (*rx3_light_fn)(unsigned int deck, unsigned int control, struct rx3_light *);
-/* The two native refreshes a module can own, one owner each. SLIP LOOP is
+/* The two native refreshes a module can own. SLIP LOOP has one owner and is
  * refreshed per deck while that pad mode is shown; the unit-wide refresh
  * covers every pad mode and SHIFT, with deck RX3_NO_DECK when the player
- * does not name one. */
+ * does not name one, and is shared by up to four owners asked in the order
+ * they registered: an owner answers only while its panel holds the pads and
+ * otherwise leaves RX3_LIGHT_NATIVE for the next. */
 #define RX3_LIGHTS_SLIP_LOOP 0u
 #define RX3_LIGHTS_PADS      1u
 
 struct rx3_input_service {
     int (*register_pad)(const void *owner, unsigned int priority, rx3_pad_handler);
     int (*register_key)(const void *owner, unsigned int priority, rx3_key_handler);
-    /* One owner per refresh; a second registration fails without replacing it. */
+    /* A second registration by the same owner, or past the limit, fails
+       without replacing anything. */
     int (*register_lights)(const void *owner, unsigned int refresh, rx3_light_fn);
     /* Ask the core to close its custom panels when a physical pad-mode key
        is pressed on the firmware path that inlines SLIP LOOP. */
