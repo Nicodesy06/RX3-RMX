@@ -1,9 +1,9 @@
 #!/bin/sh
 # SPDX-License-Identifier: MPL-2.0
-# COLOR 2, a second Sound Color FX per channel. The engines live in the
-# performance core's shared object; this module switches them on, stages the
-# COLOR 2 tab pictures, reads the optional button map and the probe switch
-# from the drive, and honours the kill switch /tmp/rx3-dual-color-fx.off.
+# COLOR 2, a second Sound Color FX per channel, played by holding two of the
+# mixer's Color FX buttons. The engines live in the performance core's shared
+# object; this module switches them on, reads the button map and the probe
+# switch from the drive, and honours the kill switch /tmp/rx3-dual-color-fx.off.
 
 module_begin dual-color-fx dual_color_fx
 
@@ -14,31 +14,51 @@ dual_color_fx_disable()
 {
     module_export RX3_FX2 0 "COLOR 2" || :
     module_export RX3_FX2_BUTTONS "" "COLOR 2" || :
+    module_export RX3_FX2_LEDS "" "COLOR 2" || :
     module_export RX3_FX2_PROBE 0 "COLOR 2" || :
 }
 
-# buttons.txt: one line of six hexadecimal key codes, comma separated, in the
-# mixer's order SPACE, DUB ECHO, SWEEP, NOISE, CRUSH, FILTER. They come from
-# the probe; nothing here guesses them. Lines starting with # are notes.
-dual_color_fx_buttons()
+# One list of six hexadecimal values, comma separated, in the mixer's order
+# SPACE, DUB ECHO, SWEEP, NOISE, CRUSH, FILTER, or empty if it is malformed.
+dual_color_fx_six()
+{
+    case "$1" in
+        *[!0-9a-fA-FxX,]*) return 1 ;;
+    esac
+    [ "$(printf '%s' "$1" | awk -F, '{print NF}')" = 6 ] || return 1
+    printf '%s' "$1"
+}
+
+# buttons.txt, from the probe: a line of the six button codes, optionally a
+# line "leds=" with their six LED IDs and a line "depth=" with COLOR 2's
+# depth (0..200, 100 is centre). Lines starting with # are notes. Nothing
+# here is executed or guessed.
+dual_color_fx_read()
 {
     DUAL_COLOR_FX_CODES=
+    DUAL_COLOR_FX_LED_IDS=
+    DUAL_COLOR_FX_DEPTH=
     [ -r "$DUAL_COLOR_FX_DIR/buttons.txt" ] || return 0
     while IFS= read -r dual_color_fx_line || [ -n "$dual_color_fx_line" ]; do
-        case "$dual_color_fx_line" in
-            ''|'#'*) continue ;;
-        esac
         dual_color_fx_line=$(printf '%s' "$dual_color_fx_line" | tr -d ' \r\t')
         case "$dual_color_fx_line" in
-            *[!0-9a-fA-FxX,]*) say "COLOR 2: buttons.txt ignored, unexpected characters"; return 0 ;;
+            ''|'#'*) ;;
+            leds=*)
+                DUAL_COLOR_FX_LED_IDS=$(dual_color_fx_six "${dual_color_fx_line#leds=}") ||
+                    say "COLOR 2: the leds= line is ignored, it needs six values"
+                ;;
+            depth=*)
+                case "${dual_color_fx_line#depth=}" in
+                    ''|*[!0-9]*) say "COLOR 2: the depth= line is ignored" ;;
+                    *) [ "${dual_color_fx_line#depth=}" -le 200 ] &&
+                           DUAL_COLOR_FX_DEPTH=${dual_color_fx_line#depth=} ;;
+                esac
+                ;;
+            *)
+                DUAL_COLOR_FX_CODES=$(dual_color_fx_six "$dual_color_fx_line") ||
+                    say "COLOR 2: buttons.txt ignored, it needs six button codes"
+                ;;
         esac
-        dual_color_fx_fields=$(printf '%s' "$dual_color_fx_line" | awk -F, '{print NF}')
-        [ "$dual_color_fx_fields" = 6 ] || {
-            say "COLOR 2: buttons.txt ignored, it needs six codes"
-            return 0
-        }
-        DUAL_COLOR_FX_CODES=$dual_color_fx_line
-        return 0
     done < "$DUAL_COLOR_FX_DIR/buttons.txt"
 }
 
@@ -52,27 +72,25 @@ dual_color_fx_prepare()
         dual_color_fx_disable
         return 0
     fi
-    stage_panel_asset dual-color-fx 16 fx2-selected || return 1
-    stage_panel_asset dual-color-fx 17 fx2-none-selected || return 1
-    stage_panel_asset dual-color-fx 18 fx2-beatfx-selected || return 1
-    dual_color_fx_buttons
+    dual_color_fx_read
     module_export RX3_FX2_BUTTONS "$DUAL_COLOR_FX_CODES" "COLOR 2" || :
+    module_export RX3_FX2_LEDS "$DUAL_COLOR_FX_LED_IDS" "COLOR 2" || :
+    module_export RX3_FX2_DEPTH "$DUAL_COLOR_FX_DEPTH" "COLOR 2" || :
     dual_color_fx_probe=0
     [ -e "$DUAL_COLOR_FX_DIR/probe" ] && dual_color_fx_probe=1
     module_export RX3_FX2_PROBE "$dual_color_fx_probe" "COLOR 2" || :
     DUAL_COLOR_FX_READY=1
     module_export RX3_FX2 1 "COLOR 2"
-    say "COLOR 2 prepared: a second Sound Color FX per channel, in series with the mixer's"
+    say "COLOR 2 prepared: hold a Color FX button and press a second to add it"
 }
 
 dual_color_fx_after_launch()
 {
     [ "$DUAL_COLOR_FX_READY" = "1" ] || return 0
-    say "COLOR 2: tap COLOR 2 on the touchscreen; < > choose, the name switches it on"
-    if [ -n "$RX3_FX2_BUTTONS" ]; then
-        say "COLOR 2: SHIFT + a Color FX button adds that effect as the second one"
+    if [ -z "$RX3_FX2_BUTTONS" ]; then
+        say "COLOR 2: no button codes yet; put the probe's codes in RX3_RUNTIME/dual-color-fx/buttons.txt"
     fi
-    [ "$RX3_FX2_PROBE" = "1" ] && say "COLOR 2: input probe on, key codes go to the session log"
+    [ "$RX3_FX2_PROBE" = "1" ] && say "COLOR 2: input probe on, key codes and LED IDs go to the session log"
     say "COLOR 2: hardware validation pending"
 }
 

@@ -62,14 +62,24 @@ static unsigned long held(void) { return 0; }
 static void log_text(const char *s) { assert(s); snprintf(last_log, sizeof(last_log), "%s", s); }
 static void log_value(const char *s, unsigned long v) { (void)v; assert(s); }
 static const struct rx3_panel_service panels = {.register_row = register_row, .unregister_row = unregister_row};
+static void key_arguments(unsigned out[3]);
+static int register_led_filter(const void *o, rx3_led_filter_fn f);
 static const struct rx3_input_service input = {.register_pad = register_pad, .register_key = register_key,
     .register_lights = register_lights, .claim_mode_keys = claim_modes, .unregister_owner = unregister_owner,
-    .shift_held = shift_held, .blink_on = blink_on, .blink_restart = blink_restart};
+    .shift_held = shift_held, .blink_on = blink_on, .blink_restart = blink_restart,
+    .register_led_filter = register_led_filter, .key_arguments = key_arguments};
 static const struct rx3_audio_service audio = {.release_deck_stream = release_deck,
     .release_master = release_master, .claim_deck_stream_at = claim_deck_at, .claim_master_at = claim_master_at};
 static const struct rx3_memory_service memory = {reserve, settle, settle, settle, available, held};
+static unsigned band_mask = 7u;
+static unsigned mask_of(unsigned d) { (void)d; return band_mask; }
+static const struct rx3_band_service bands = {.mask = mask_of};
+static unsigned key_args[3];
+static void key_arguments(unsigned out[3]) { out[0] = key_args[0]; out[1] = key_args[1]; out[2] = key_args[2]; }
+static rx3_led_filter_fn led_filter;
+static int register_led_filter(const void *o, rx3_led_filter_fn f) { assert(o && f); led_filter = f; return 1; }
 static const struct rx3_services services = {.log_line = log_text, .log_number = log_value,
-    .panels = &panels, .input = &input, .audio = &audio, .memory = &memory};
+    .panels = &panels, .input = &input, .audio = &audio, .memory = &memory, .bands = &bands};
 static const uint8_t prologue[8] = {0x08, 0x40, 0x2d, 0xe9, 0x00, 0x10, 0xa0, 0xe1};
 static int bpm(unsigned d) { return d == 0 ? 12800 : 9000; }
 
@@ -251,7 +261,7 @@ int main(void) {
 }
 ''', [], ['-pthread', '-Wno-unused-function'])
 
-    def test_color2_module_through_its_callbacks(self):
+    def test_color2_chord_through_its_callbacks(self):
         self.run_units(MOCKS + r'''
 #include "dual-color-fx/rx3_fx2_module.c"
 static struct rx3_stereo in[4096], out[4096];
@@ -259,76 +269,88 @@ static struct rx3_stereo in[4096], out[4096];
 static float power(const struct rx3_stereo *x, unsigned n) {
     double s = 0; for (unsigned i = 0; i < n; i++) s += x[i].left * x[i].left; return (float)(s / n);
 }
+static int send(unsigned code, unsigned operation) {
+    struct rx3_key_event k = {code, operation, 1}; return key(&k);
+}
+/* The mixer's order: SPACE, DUB ECHO, SWEEP, NOISE, CRUSH, FILTER. */
+enum { SPACE = 0x4180, ECHO, SWEEP, NOISE, CRUSH, FILTER };
 int main(void) {
     fx2_bpm_reader = bpm; fx2_bpm_prologue = prologue;
     setenv("RX3_FX2", "1", 1);
     setenv("RX3_FX2_BUTTONS", "0x4180,4181,4182,4183,4184,4185", 1);
+    setenv("RX3_FX2_LEDS", "21,22,23,24,25,26", 1);
+    setenv("RX3_FX2_DEPTH", "40", 1);
     setenv("RX3_FX2_PROBE", "1", 1);
     assert(rx3_fx2_module.start(&services) == 1);
-    assert(deck_count == 1 && decks[0].priority == 60 && key);
-    assert(row && row->panel_id == 3 && row->scope == RX3_PAD_SCOPE_DECK);
-    assert(row->tab_slots[RX3_TAB_STATUS_SELECTED] == 16 && row->tab_slots[RX3_TAB_STATUS_BEATFX] == 18);
-    assert(fx2_buttons_known && fx2_buttons[0] == 0x4180 && fx2_buttons[5] == 0x4185);
+    /* No screen: nothing registered on the touchscreen. */
+    assert(!row && deck_count == 1 && decks[0].priority == 60 && key && led_filter);
+    assert(fx2_buttons_known && fx2_leds_known && fx2_depth == 40);
     rx3_fx2_module.audio_started(44100);
 
     /* Off: bit-exact. */
     tone(in, 4096, 0, 5000.0f); memcpy(out, in, sizeof(in)); run_deck(0, out, 4096);
     assert(!memcmp(in, out, sizeof(in)));
 
-    /* FILTER far left on deck 1 only: a 5 kHz tone mostly gone, deck 2 untouched. */
-    assert(fx2_decks[0].kind == FX_COLOR_FILTER);
-    row->slider_set(0, FX2_W_COLOR, 20, 1);
-    assert(fx2_decks[0].on && row->is_on(0, FX2_W_KIND, 1));
-    for (unsigned b = 0; b < 8; b++) { tone(out, 4096, b * 4096, 5000.0f); run_deck(0, out, 4096); }
-    assert(power(out, 4096) < 0.02f * 0.02f);
-    tone(in, 4096, 0, 5000.0f); memcpy(out, in, sizeof(in)); run_deck(1, out, 4096);
-    assert(!memcmp(in, out, sizeof(in)));
-    /* The caption reads the bipolar position. */
-    const uint16_t *c = row->caption(0, FX2_W_COLOR, 0);
-    assert(c[6] == '-' && c[7] == '8' && c[8] == '0' && c[9] == 0);
-
-    /* A tap on COLOR returns it to centre: bypass again, exactly, once the
-       smoothing has arrived. */
-    row->fire(0, FX2_W_COLOR, 0);
-    for (unsigned b = 0; b < 4; b++) { tone(out, 4096, b * 4096, 5000.0f); run_deck(0, out, 4096); }
-    tone(in, 4096, 0, 5000.0f); memcpy(out, in, sizeof(in)); run_deck(0, out, 4096);
-    assert(!memcmp(in, out, sizeof(in)));
-
-    /* DUB ECHO, then switch to FILTER: the echo keeps ringing under it. */
-    row->fire(0, FX2_W_KIND, 2);
-    assert(fx2_decks[0].kind == FX_COLOR_DUB_ECHO);
-    row->slider_set(0, FX2_W_COLOR, 170, 1);
+    /* One button alone is the mixer's: passed through, nothing starts. */
+    assert(!send(FILTER, 0)); assert(!fx2_decks[0].on);
+    /* Holding it, a second button is a chord: consumed, COLOR 2 = DUB ECHO
+       on both channels, the mixer keeps FILTER. */
+    assert(send(ECHO, 0));
+    assert(fx2_decks[0].on && fx2_decks[1].on && fx2_decks[0].kind == FX_COLOR_DUB_ECHO);
+    assert(send(ECHO, 2));                       /* its release, consumed too */
+    assert(!send(FILTER, 2));                    /* the mixer's own release */
+    /* It plays at the depth from the drive: echoes ring after the input stops. */
     for (unsigned b = 0; b < 4; b++) { tone(out, 4096, b * 4096, 440.0f); run_deck(0, out, 4096); }
-    row->fire(0, FX2_W_KIND, 0);
-    assert(fx2_decks[0].kind == FX_COLOR_FILTER && fx2_decks[0].color[FX_COLOR_FILTER] == 100);
     memset(out, 0, sizeof(out)); run_deck(0, out, 4096);
-    assert(power(out, 4096) > 1e-6f);                       /* silence in, echoes out */
-    assert(fx_color_has_tail(&fx2_engines[0][FX_COLOR_DUB_ECHO]));
-    /* Each effect kept its own position. */
-    row->fire(0, FX2_W_KIND, 2);
-    assert(row->slider_get(0, FX2_W_COLOR) == 170);
+    assert(power(out, 4096) > 1e-6f);
+    /* Its light is lit beside the mixer's: DUB ECHO is the second LED. */
+    struct rx3_light l = {RX3_LIGHT_NATIVE, 0};
+    /* LED IDs are hexadecimal, as the probe prints them. */
+    led_filter(0x22, 1, &l); assert(l.state == RX3_LIGHT_ON);
+    l.state = RX3_LIGHT_NATIVE; led_filter(0x26, 1, &l); assert(l.state == RX3_LIGHT_NATIVE);
+    /* Another button alone still goes to the mixer; COLOR 2 stays. */
+    assert(!send(CRUSH, 0)); assert(!send(CRUSH, 2)); assert(fx2_is(FX_COLOR_DUB_ECHO));
+    /* DUB ECHO tapped alone stops COLOR 2, and the mixer never hears it. */
+    assert(send(ECHO, 0)); assert(send(ECHO, 2)); assert(!fx2_decks[0].on);
+    /* A chord again starts it; the same chord stops it. */
+    assert(!send(CRUSH, 0)); assert(send(SWEEP, 0)); assert(fx2_is(FX_COLOR_SWEEP));
+    assert(send(SWEEP, 2)); assert(send(SWEEP, 0)); assert(!fx2_decks[0].on);
+    assert(send(SWEEP, 2)); assert(!send(CRUSH, 2));
 
-    /* SHIFT + a mapped Color FX button adds that effect on both channels and
-       is consumed with its release; without SHIFT the mixer has it. */
-    struct rx3_key_event k = {0x4185, 0, 1};
-    assert(!key(&k));
-    shift = 1; assert(key(&k)); shift = 0;
-    assert(fx2_decks[0].kind == FX_COLOR_FILTER && fx2_decks[1].kind == FX_COLOR_FILTER && fx2_decks[1].on);
-    k.operation = 2; assert(key(&k));
-    k.operation = 2; assert(!key(&k));
-    /* The probe heard it, and writes it out on the diagnostic worker. */
+    /* With ISOLATOR's FX buttons on HIGH only, a low-pass COLOR 2 leaves the
+       low band alone: a FILTER chord at depth 40 (to the left). */
+    band_mask = RX3_BAND_HIGH;
+    assert(!send(SPACE, 0)); assert(send(FILTER, 0)); assert(send(FILTER, 2)); assert(!send(SPACE, 2));
+    assert(fx2_is(FX_COLOR_FILTER));
+    for (unsigned b = 0; b < 12; b++) { tone(out, 4096, b * 4096, 80.0f); run_deck(1, out, 4096); }
+    tone(in, 4096, 12 * 4096, 80.0f);
+    assert(power(out, 4096) > power(in, 4096) * 0.8f);   /* 80 Hz kept */
+    for (unsigned b = 0; b < 12; b++) { tone(out, 4096, b * 4096, 9000.0f); run_deck(1, out, 4096); }
+    tone(in, 4096, 12 * 4096, 9000.0f);
+    assert(power(out, 4096) < power(in, 4096) * 0.1f);   /* 9 kHz filtered */
+    band_mask = RX3_BAND_ALL;
+
+    /* The probe: every key, how often, its further arguments; every LED ID. */
+    key_args[0] = 0x55; assert(!send(0x4f00, 0)); assert(!send(0x4f00, 0));
     rx3_fx2_module.report();
-    for (unsigned i = 0; i < fx2_probe_count; i++) assert(fx2_probe[i].key == 0x4185);
-    assert(fx2_probe_count == 1);
+    int found = 0;
+    for (unsigned i = 0; i < fx2_probe_count; i++)
+        if (fx2_probe[i].key == 0x4f00) { found = 1; assert(fx2_probe[i].count == 2 && fx2_probe[i].arguments[0] == 0x55); }
+    assert(found);
+    assert(fx2_probe_led_count >= 2);
+    rx3_fx2_module.report();                 /* the last line written is the probe's or the bpm's */
+    assert(last_log[0] == 'f');
 
-    /* A button map that is not exactly six distinct codes stays off. */
+    /* A list that is not exactly six distinct codes stays off. */
     fx2_parse_buttons("4180,4181"); assert(!fx2_buttons_known);
     fx2_parse_buttons("4180,4181,4182,4183,4184,4180"); assert(!fx2_buttons_known);
     fx2_parse_buttons("4180,4181,4182,4183,4184,zz"); assert(!fx2_buttons_known);
     fx2_parse_buttons("4180,4181,4182,4183,4184,41850"); assert(!fx2_buttons_known);
+    /* Without codes, no key is ever consumed. */
+    assert(!send(ECHO, 0) && !send(FILTER, 0));
 
     rx3_fx2_module.stop();
-    assert(deck_count == 0 && !row);
+    assert(deck_count == 0);
     return 0;
 }
 ''', [], ['-pthread', '-Wno-unused-function'])
@@ -373,13 +395,19 @@ module_export(){{ printf 'EXPORT %s=%s\\n' "$1" "$2"; return 1; }}
         self.assertIn('EXPORT RX3_FX2=1', out)
         self.assertIn('EXPORT RX3_FX2_BUTTONS=\n', out)
         self.assertIn('EXPORT RX3_FX2_PROBE=0', out)
-        for slot in ('16', '17', '18'):
-            self.assertIn(f'STAGE dual-color-fx {slot} ', out)
-        good = '# from the probe\n0x4180, 0x4181,0x4182,0x4183,0x4184,0x4185\n'
+        self.assertNotIn('STAGE', out)                     # no screen of its own
+        good = ('# from the probe\n0x4180, 0x4181,0x4182,0x4183,0x4184,0x4185\n'
+                'leds=21,22,23,24,25,26\ndepth=40\n')
         out = self.run_prepare('dual-color-fx', 'dual_color_fx_prepare',
                                {'buttons.txt': good, 'probe': ''})
         self.assertIn('EXPORT RX3_FX2_BUTTONS=0x4180,0x4181,0x4182,0x4183,0x4184,0x4185\n', out)
+        self.assertIn('EXPORT RX3_FX2_LEDS=21,22,23,24,25,26\n', out)
+        self.assertIn('EXPORT RX3_FX2_DEPTH=40\n', out)
         self.assertIn('EXPORT RX3_FX2_PROBE=1', out)
+        out = self.run_prepare('dual-color-fx', 'dual_color_fx_prepare',
+                               {'buttons.txt': 'depth=900\nleds=1,2\ndepth=$(touch injected)\n'})
+        self.assertIn('EXPORT RX3_FX2_DEPTH=\n', out)
+        self.assertIn('EXPORT RX3_FX2_LEDS=\n', out)
         for bad in ('0x4180,0x4181\n', '$(touch injected),1,2,3,4,5\n', '4180;4181;4182;4183;4184;4185\n'):
             out = self.run_prepare('dual-color-fx', 'dual_color_fx_prepare', {'buttons.txt': bad})
             self.assertIn('EXPORT RX3_FX2_BUTTONS=\n', out)
@@ -400,7 +428,8 @@ module_export(){{ printf 'EXPORT %s=%s\\n' "$1" "$2"; return 1; }}
     def test_probe_line_format(self):
         """The probe line is what buttons.txt is written from: hexadecimal."""
         source = (test_framework.MODULES / 'dual-color-fx/rx3_fx2_feature.h').read_text()
-        self.assertIn('"fx2 probe key=0x0000 op=0 ch=0"', source)
+        self.assertIn('"fx2 probe key=0x0000 op=0 ch=0 n=0000 a=00000000 b=00000000 c=00000000"', source)
+        self.assertIn('"fx2 probe led id=0x0000 ch=0"', source)
 
 
 if __name__ == '__main__':

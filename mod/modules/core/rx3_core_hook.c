@@ -1673,8 +1673,10 @@ __attribute__((constructor)) static void initialize(void)
        native hooks as clients arrive. */
     unsigned int started = rx3_modules_start();
     if (rx3_modules_failures()) { rx3_modules_stop(); return; }
+    /* A module on a deck stream needs PcmReader::load to know its decks,
+       even with nothing on screen. */
     if (!rx3_panel_count() && !rx3_image_contributions() && !rx3_browse_count() &&
-        !rx3_titles_enabled()) {
+        !rx3_titles_enabled() && !rx3_audio_count()) {
         if (started) {
             publish_ready();
             log_line("RX3 performance hook active");

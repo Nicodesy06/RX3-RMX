@@ -106,7 +106,8 @@ static int player_process_initialized,player_process=1;
 static int is_player_process(void){return player_process;}
 /* What each selected module registers when it starts: logo=1 and theme=8
    contribute images, keyshift=2, stems=4, samples=16 and 64 register panels,
-   keyshift also listens for the audio device, search=32 needs no display. */
+   keyshift also listens for the audio device, search=32 needs no display,
+   and COLOR 2=128 sits on a deck stream with nothing on screen. */
 static char *setting(const char *s){(void)s;return 0;}
 #define getenv setting
 static int marker_open(const char *p,int f,int m){(void)p;(void)f;(void)m;ready=0;return 1;}
@@ -124,13 +125,14 @@ static int rx3_write_guarded(unsigned long a,const void *e,const void *r,unsigne
 static void rx3_input_bind_mode_keys(void (*f)(void)){bound+=f==leave_performance_panel;}
 static void rx3_panels_bind_refresh(void (*f)(void)){bound+=f==refresh_performance_ui;}
 static void rx3_modules_bind_writer(int (*f)(unsigned long,const void *,const void *,unsigned)){bound+=f==rx3_write_guarded;}
-static unsigned rx3_modules_start(void){modules_started++;return __builtin_popcount(selection&127);}
+static unsigned rx3_modules_start(void){modules_started++;return __builtin_popcount(selection&255);}
 static unsigned rx3_modules_failures(void){return module_fail;}
 static int rx3_modules_uses_audio(void){return !!(selection&2);}
 static unsigned rx3_image_contributions(void){return !!(selection&(1|8));}
 static int rx3_titles_enabled(void){return 0;}
 static unsigned rx3_browse_count(void){return 0;}
 static unsigned rx3_panel_count(void){return !!(selection&(2|4|16|64));}
+static unsigned rx3_audio_count(void){return !!(selection&128);}
 static void rx3_modules_stop(void){stops++;}
 static void uninstall_performance_hooks(void){cleanup++;}
 static void publish_ready(void){ready=1;}
@@ -154,6 +156,8 @@ int main(void) {
         assert(mask==32 ? !hook_calls : hook_calls>0);
     }
     run(0,0,0);assert(!ready && !hook_calls);
+    /* A deck-stream client alone still needs the deck identity hook. */
+    run(128,0,0);assert(ready && hook_calls>0);
     /* A rejected firmware hook stops every module and removes what was put in. */
     run(4|32,1,0);assert(!ready && stops && cleanup);
     run(1|16,3,0);assert(!ready && stops && cleanup);
