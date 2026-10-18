@@ -391,11 +391,48 @@ static void test_color(void)
     free(x); free(y);
 }
 
+/* Host cost of the bus engines while they work hardest: a roll repeating, a
+   loop playing four layers while it overdubs a fifth. */
+static void cost_bus(void)
+{
+    unsigned int capacity = fx_rmx_capacity(RATE), frames = 689u * 256u;   /* whole blocks */
+    struct fx_frame *buffer = calloc(capacity, sizeof(*buffer));
+    struct fx_frame *x = malloc(frames * sizeof(*x)), *y = calloc(frames, sizeof(*y));
+    noise(x, frames, 9u, 0.5f);
+    static struct fx_roll roll;
+    fx_roll_init(&roll, buffer, capacity);
+    fx_roll_set(&roll, 5000u, 1u);
+    clock_t begin = clock();
+    for (unsigned int at = 0; at < frames; at += 256u) fx_roll_process(&roll, x + at, 256u);
+    printf("cost: ROLL     %.1f ns per frame on this host\n",
+           (double)(clock() - begin) / CLOCKS_PER_SEC * 1e9 / frames);
+    struct fx_frame *base = calloc(capacity, sizeof(*base)), *slots[FX_LOOP_SLOTS];
+    for (unsigned int i = 0; i < FX_LOOP_SLOTS; i++) slots[i] = calloc(capacity, sizeof(*base));
+    static struct fx_loop loop;
+    fx_loop_init(&loop, base, slots, capacity);
+    fx_loop_command(&loop, FX_LOOP_CMD_RECORD, 20000u);
+    for (unsigned int at = 0; at < 20000u + FX_RMX_SEAM; at += 256u) fx_loop_process(&loop, x + at, y + at, 256u);
+    for (unsigned int layer = 0; layer < 4u; layer++) {
+        fx_loop_command(&loop, FX_LOOP_CMD_OVERDUB_ON, 0u);
+        for (unsigned int at = 0; at < 20480u; at += 256u) fx_loop_process(&loop, x + at, y + at, 256u);
+        fx_loop_command(&loop, FX_LOOP_CMD_OVERDUB_OFF, 0u);
+        for (unsigned int at = 0; at < 2560u; at += 256u) fx_loop_process(&loop, x + at, y + at, 256u);
+    }
+    fx_loop_command(&loop, FX_LOOP_CMD_OVERDUB_ON, 0u);
+    begin = clock();
+    for (unsigned int at = 0; at < frames; at += 256u) fx_loop_process(&loop, x + at, y + at, 256u);
+    printf("cost: LOOP     %.1f ns per frame on this host (%u layers, overdubbing)\n",
+           (double)(clock() - begin) / CLOCKS_PER_SEC * 1e9 / frames, loop.shown_layers);
+    free(buffer); free(x); free(y); free(base);
+    for (unsigned int i = 0; i < FX_LOOP_SLOTS; i++) free(slots[i]);
+}
+
 int main(void)
 {
     test_roll();
     test_loop();
     test_color();
+    cost_bus();
     if (failures) { printf("%d check(s) failed\n", failures); return 1; }
     printf("all fx engine checks passed\n");
     return 0;
