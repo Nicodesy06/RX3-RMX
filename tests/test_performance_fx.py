@@ -122,6 +122,7 @@ class PerformanceFxTests(unittest.TestCase):
     def test_rmx_xpad_module_through_its_callbacks(self):
         self.run_units(MOCKS + r'''
 #include "rmx-looper/rx3_rmx_module.c"
+#include "core/ui/rx3_pad_layout.h"
 static struct rx3_stereo in[512], out[512], bus[512];
 static void master_block(void) { memset(bus, 0, sizeof(bus)); master(bus, 512); }
 static float bus_peak(void) { float p = 0; for (unsigned i = 0; i < 512; i++) if (fx_absf(bus[i].left) > p) p = fx_absf(bus[i].left); return p; }
@@ -135,6 +136,15 @@ int main(void) {
     assert(row && row->panel_id == 2 && row->count == 12 && row->strip);
     assert(row->widgets[RMX_W_PICK].kind == RX3_PAD_TOGGLE && row->widgets[RMX_W_STRIP].kind == RX3_PAD_STRIP);
     assert(row->tab_slots[RX3_TAB_PAIR_LEFT] == 11 && pad && light && modes == 1);
+    /* Across the screen, no control may straddle the two deck windows: the
+       core clips each half into its own, and a caption across x=640 is cut. */
+    {
+        unsigned char weights[RX3_PAD_CELL_MAX];
+        struct rx3_pad_cell cells[RX3_PAD_CELL_MAX];
+        for (unsigned i = 0; i < row->count; i++) weights[i] = row->widgets[i].weight;
+        assert(rx3_pad_solve(weights, (int)row->count, RX3_PAD_SCREEN_ORIGIN, RX3_PAD_SCREEN_SPAN, cells) == 12);
+        for (unsigned i = 0; i < 12; i++) assert(!(cells[i].x1 <= 640 && cells[i].x2 >= 639));
+    }
     rx3_rmx_module.audio_started(44100);
     for (unsigned i = 0; i < 200 && rmx_bpm_x100[0] != 12800; i++) usleep(10000);
     assert(rmx_bpm_x100[0] == 12800);
@@ -355,6 +365,66 @@ int main(void) {
 }
 ''', [], ['-pthread', '-Wno-unused-function'])
 
+    def test_isolator_through_its_callbacks(self):
+        self.run_units(MOCKS + r'''
+#include "isolator/rx3_iso_module.c"
+static struct rx3_stereo in[4096], out[4096];
+static float power(const struct rx3_stereo *x, unsigned n) {
+    double s = 0; for (unsigned i = 0; i < n; i++) s += x[i].left * x[i].left; return (float)(s / n);
+}
+static float through(unsigned deck, float hz) {
+    for (unsigned b = 0; b < 6; b++) { tone(out, 4096, b * 4096, hz); run_deck(deck, out, 4096); }
+    tone(in, 4096, 6 * 4096, hz);
+    return power(out, 4096) / power(in, 4096);
+}
+int main(void) {
+    struct rx3_services with_bands = services;
+    with_bands.bands = &rx3_bands;
+    setenv("RX3_ISOLATOR", "1", 1);
+    assert(rx3_iso_module.start(&with_bands) == 1);
+    assert(deck_count == 1 && decks[0].priority == 70);
+    assert(row && row->panel_id == 3 && row->scope == RX3_PAD_SCOPE_DECK && row->count == 6);
+    assert(row->tab_slots[RX3_TAB_STATUS_SELECTED] == 16);
+    /* It provides the effect bands; another module cannot. */
+    static const char other = 0;
+    assert(!rx3_bands.provide(&other));
+    rx3_iso_module.audio_started(44100);
+
+    /* Flat: bit-exact. */
+    tone(in, 4096, 0, 80.0f); memcpy(out, in, sizeof(in)); run_deck(0, out, 4096);
+    assert(!memcmp(in, out, sizeof(in)));
+    /* LOW tapped: killed; the bass goes, the highs stay; the other deck too. */
+    row->fire(0, 0, 0);
+    assert(row->is_on(0, 0, 0) && row->caption(0, 0, 0)[4] == 'K');
+    assert(through(0, 80.0f) < 0.01f);
+    assert(through(0, 9000.0f) > 0.9f);
+    tone(in, 4096, 0, 80.0f); memcpy(out, in, sizeof(in)); run_deck(1, out, 4096);
+    assert(!memcmp(in, out, sizeof(in)));
+    /* MID dragged to +6 dB: four times the power of a mid tone. */
+    row->fire(0, 0, 0);
+    row->slider_set(0, 1, ISO_LEVEL_MAX, 1);
+    const uint16_t *c = row->caption(0, 1, 0);
+    assert(c[4] == '+' && c[5] == '6');
+    float boost = through(0, 900.0f);
+    assert(boost > 3.6f && boost < 4.4f);
+    /* Back to 0 dB through the detent: bit-exact again once it has faded out. */
+    row->slider_set(0, 1, ISO_UNITY + 1u, 1);
+    for (unsigned b = 0; b < 8; b++) { tone(out, 4096, b * 4096, 900.0f); run_deck(0, out, 4096); }
+    tone(in, 4096, 0, 900.0f); memcpy(out, in, sizeof(in)); run_deck(0, out, 4096);
+    assert(!memcmp(in, out, sizeof(in)));
+    /* FX bands: LOW and MID off leaves HIGH for the effects; none means all. */
+    row->fire(1, ISO_W_FX + 0, 0); row->fire(1, ISO_W_FX + 1, 0);
+    assert(rx3_bands.mask(1) == RX3_BAND_HIGH && rx3_bands.mask(0) == RX3_BAND_ALL);
+    assert(!row->is_on(1, ISO_W_FX, 0) && row->is_on(1, ISO_W_FX + 2, 0));
+    row->fire(1, ISO_W_FX + 2, 0);
+    assert(rx3_bands.mask(1) == RX3_BAND_ALL);
+    rx3_iso_module.stop();
+    assert(deck_count == 0 && !row && rx3_bands.mask(1) == RX3_BAND_ALL);
+    assert(rx3_bands.provide(&other));
+    return 0;
+}
+''', ['core/services/rx3_bands.c'], ['-pthread', '-Wno-unused-function', '-Wno-unused-const-variable'])
+
     def run_prepare(self, module, function, files=None, switch_off=False):
         """One module.sh prepare hook, in a shell with the orchestrator's
         functions stubbed to print what they are asked."""
@@ -411,6 +481,15 @@ module_export(){{ printf 'EXPORT %s=%s\\n' "$1" "$2"; return 1; }}
         for bad in ('0x4180,0x4181\n', '$(touch injected),1,2,3,4,5\n', '4180;4181;4182;4183;4184;4185\n'):
             out = self.run_prepare('dual-color-fx', 'dual_color_fx_prepare', {'buttons.txt': bad})
             self.assertIn('EXPORT RX3_FX2_BUTTONS=\n', out)
+
+    def test_isolator_prepare_stages_its_slots_and_honours_its_switch(self):
+        out = self.run_prepare('isolator', 'isolator_prepare')
+        for slot in ('16', '17', '18'):
+            self.assertIn(f'STAGE isolator {slot} ', out)
+        self.assertIn('EXPORT RX3_ISOLATOR=1', out)
+        out = self.run_prepare('isolator', 'isolator_prepare', switch_off=True)
+        self.assertIn('EXPORT RX3_ISOLATOR=0', out)
+        self.assertNotIn('STAGE', out)
 
     def test_symbol_finder_reads_an_arm_symbol_table(self):
         """Run on the hook itself: the only ARM ELF this repository may hold."""

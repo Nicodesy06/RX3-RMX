@@ -140,7 +140,8 @@
       "core/services/rx3_loader.c",
       "rmx-looper/rx3_rmx_module.c",
       "dual-color-fx/rx3_fx2_module.c",
-      "core/services/rx3_bands.c"
+      "core/services/rx3_bands.c",
+      "isolator/rx3_iso_module.c"
     ]
   },
   "advanced": true

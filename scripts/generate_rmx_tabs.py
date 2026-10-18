@@ -31,9 +31,9 @@ JOBS = (
     ("stems", "stems-selected", "rmx-looper", "rmx-selected", "right", "RMX"),
     ("stems", "single-stems-none", "rmx-looper", "single-rmx-none", "whole", "RMX X-PAD"),
     ("stems", "single-stems-selected", "rmx-looper", "single-rmx-selected", "whole", "RMX X-PAD"),
-    ("samples", "samples-selected", "dual-color-fx", "fx2-selected", "left", "COLOR 2"),
-    ("samples", "samples-none-selected", "dual-color-fx", "fx2-none-selected", "left", "COLOR 2"),
-    ("samples", "samples-beatfx-selected", "dual-color-fx", "fx2-beatfx-selected", "left", "COLOR 2"),
+    ("samples", "samples-selected", "isolator", "iso-selected", "left", "ISOLATOR"),
+    ("samples", "samples-none-selected", "isolator", "iso-none-selected", "left", "ISOLATOR"),
+    ("samples", "samples-beatfx-selected", "isolator", "iso-beatfx-selected", "left", "ISOLATOR"),
 )
 
 FONTS = (

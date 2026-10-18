@@ -63,40 +63,29 @@ def cases():
         ]
 
 
-    # ROLL / LOOP: one row across the screen. Idle, then rolling 1/4 with
-    # HOLD while the loop records, then the loop playing with an overdub.
-    def rmx(source, division, roll, hold, loop, overdub, back, level, lit_loop=False):
-        return [
-            Widget(STEPPER, weight=3, captions=["<", source, ">"], states=[INACTIVE] * 3),
-            Widget(STEPPER, weight=3, captions=["<", division, ">"], states=[INACTIVE] * 3),
-            Widget(TOGGLE, weight=2, captions=["ROLL"], states=[SELECTED if roll else INACTIVE]),
-            Widget(TOGGLE, weight=2, captions=["HOLD"], states=[SELECTED if hold else INACTIVE]),
-            Widget(BUTTON, weight=2, captions=[loop], states=[SELECTED if lit_loop else INACTIVE]),
-            Widget(TOGGLE, weight=3, captions=["OVERDUB"], states=[SELECTED if overdub else INACTIVE]),
-            Widget(BUTTON, weight=2, captions=[back], states=[INACTIVE]),
-            Widget(TOGGLE, weight=3, captions=[level], states=[SELECTED]),
-        ]
-    yield "rmx-idle", "screen", rmx("CH1", "1", False, False, "REC", False, "UNDO", "LVL 80")
-    yield "rmx-rolling", "screen", rmx("CH1", "1/4", True, True, "REC *", False, "UNDO", "LVL 80", True)
-    yield "rmx-overdub", "screen", rmx("MST", "1/16", False, False, "STOP", True, "UNDO", "LVL 65", True)
+    # RMX X-PAD: one row across the screen, the RMX-1000's X-PAD FX section.
+    def xpad(pick, section, pitch, volume, fine=False):
+        names = ["ROLL 1", "KICK", "SNARE", "CLAP", "HI HAT"]
+        strip = ["1/16", "1/8", "1/4", "1/2", "1/1"] if fine else ["1/8", "1/4", "1/2", "1/1", "2/1"]
+        return ([Widget(TOGGLE, weight=2, captions=[n], states=[SELECTED if i == pick else INACTIVE])
+                 for i, n in enumerate(names)] +
+                [Widget(TOGGLE, weight=3, captions=[pitch], states=[SELECTED if pitch != "PITCH 0" else INACTIVE])] +
+                [Widget(TOGGLE, weight=2, captions=[n], states=[SELECTED if i == section else INACTIVE])
+                 for i, n in enumerate(strip)] +
+                [Widget(TOGGLE, weight=3, captions=[volume], states=[SELECTED])])
+    yield "xpad-idle", "screen", xpad(0, -1, "PITCH 0", "VOL 80")
+    yield "xpad-roll", "screen", xpad(0, 1, "PITCH 0", "VOL 80")
+    yield "xpad-kick-fine", "screen", xpad(1, 0, "PITCH -7", "VOL 65", fine=True)
 
-    # COLOR 2: one row per deck; COLOR and PARAM show a track only in a drag.
-    yield "fx2-off", "deck", [
-        Widget(STEPPER, weight=6, captions=["<", "FILTER", ">"], states=[INACTIVE] * 3),
-        Widget(TOGGLE, weight=4, captions=["COLOR 0"], states=[INACTIVE]),
-        Widget(TOGGLE, weight=3, captions=["PARAM 50"], states=[INACTIVE]),
+    # ISOLATOR: one row per deck.
+    yield "isolator", "deck", [
+        Widget(TOGGLE, weight=4, captions=["LOW KILL"], states=[SELECTED]),
+        Widget(TOGGLE, weight=4, captions=["MID 0"], states=[INACTIVE]),
+        Widget(TOGGLE, weight=4, captions=["HIGH +6"], states=[SELECTED]),
+        Widget(TOGGLE, weight=3, captions=["FX LOW"], states=[INACTIVE]),
+        Widget(TOGGLE, weight=3, captions=["FX MID"], states=[SELECTED]),
+        Widget(TOGGLE, weight=3, captions=["FX HI"], states=[SELECTED]),
     ]
-    yield "fx2-echo", "deck", [
-        Widget(STEPPER, weight=6, captions=["<", "DUB ECHO", ">"], states=[INACTIVE, SELECTED, INACTIVE]),
-        Widget(TOGGLE, weight=4, captions=["COLOR +70"], states=[SELECTED]),
-        Widget(TOGGLE, weight=3, captions=["PARAM 80"], states=[INACTIVE]),
-    ]
-    yield "fx2-drag", "deck", [
-        Widget(STEPPER, weight=6, captions=["<", "SPACE", ">"], states=[INACTIVE, SELECTED, INACTIVE]),
-        Widget(SLIDER, weight=4, value=40, maximum=200, captions=[""], states=[SELECTED]),
-        Widget(TOGGLE, weight=3, captions=["PARAM 50"], states=[INACTIVE]),
-    ]
-
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])

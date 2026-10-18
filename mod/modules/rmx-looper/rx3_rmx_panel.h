@@ -2,8 +2,11 @@
  * The RMX X-PAD on the touchscreen: one row across both halves, laid out as
  * the RMX-1000's X-PAD FX section.
  *
- *   [ROLL 1][KICK][SNARE][CLAP][HI HAT] [1/8][1/4][1/2][1/1][2/1] [PITCH 0][VOL 80]
- *    the X-PAD FX buttons                the X-PAD strip            knobs
+ *   [ROLL 1][KICK][SNARE][CLAP][HI HAT][PITCH 0] | [1/8][1/4][1/2][1/1][2/1][VOL 80]
+ *    the X-PAD FX buttons, left half              | the X-PAD strip, right half
+ *
+ * Each half carries the same weight, so the boundary between the deck windows
+ * falls in a gap: a control straddling it would be clipped in two.
  *
  * Tap a button to choose what the strip plays; a sound also plays at once.
  * Touch the strip and slide along it: ROLL rolls the source at the section's
@@ -15,10 +18,12 @@
 #define RX3_RMX_PANEL_H
 
 #define RMX_W_PICK 0u                        /* five X-PAD FX buttons */
-#define RMX_W_STRIP RMX_PICKS                /* five strip sections */
-#define RMX_W_PITCH (RMX_W_STRIP + RMX_STRIP_SECTIONS)
-#define RMX_W_VOLUME (RMX_W_PITCH + 1u)
+#define RMX_W_PITCH RMX_PICKS
+#define RMX_W_STRIP (RMX_W_PITCH + 1u)       /* five strip sections */
+#define RMX_W_VOLUME (RMX_W_STRIP + RMX_STRIP_SECTIONS)
 #define RMX_WIDGETS (RMX_W_VOLUME + 1u)
+#define RMX_IS_PICK(w) ((w) < RMX_PICKS)
+#define RMX_IS_STRIP(w) ((w) >= RMX_W_STRIP && (w) < RMX_W_VOLUME)
 
 static const uint16_t rmx_text_picks[RMX_PICKS][7] = {
     {'R','O','L','L',' ','1',0}, {'K','I','C','K',0}, {'S','N','A','R','E',0},
@@ -49,8 +54,8 @@ static const uint16_t *rmx_caption(unsigned int deck, unsigned int widget, unsig
         roll[5] = marks[__atomic_load_n(&rmx_source, __ATOMIC_SEQ_CST) % 3u];
         return roll;
     }
-    if (widget < RMX_W_STRIP) return rmx_text_picks[widget];
-    if (widget < RMX_W_PITCH) {
+    if (RMX_IS_PICK(widget)) return rmx_text_picks[widget];
+    if (RMX_IS_STRIP(widget)) {
         unsigned int fine = __atomic_load_n(&rmx_section, __ATOMIC_SEQ_CST) >= 0 &&
                             __atomic_load_n(&rmx_section_fine, __ATOMIC_SEQ_CST);
         return rmx_strip_text[fine][widget - RMX_W_STRIP];
@@ -67,8 +72,8 @@ static const uint16_t *rmx_caption(unsigned int deck, unsigned int widget, unsig
 static int rmx_is_on(unsigned int deck, unsigned int widget, unsigned int part)
 {
     (void)deck; (void)part;
-    if (widget < RMX_W_STRIP) return __atomic_load_n(&rmx_pick, __ATOMIC_SEQ_CST) == widget;
-    if (widget < RMX_W_PITCH)
+    if (RMX_IS_PICK(widget)) return __atomic_load_n(&rmx_pick, __ATOMIC_SEQ_CST) == widget;
+    if (RMX_IS_STRIP(widget))
         return __atomic_load_n(&rmx_section, __ATOMIC_SEQ_CST) == (int)(widget - RMX_W_STRIP);
     if (widget == RMX_W_PITCH) return __atomic_load_n(&rmx_semitones, __ATOMIC_SEQ_CST) != 0;
     return !__atomic_load_n(&rmx_muted, __ATOMIC_SEQ_CST);
@@ -77,7 +82,7 @@ static int rmx_is_on(unsigned int deck, unsigned int widget, unsigned int part)
 static void rmx_fire(unsigned int deck, unsigned int widget, unsigned int part)
 {
     (void)deck; (void)part;
-    if (widget < RMX_W_STRIP) rmx_pick_button(widget);
+    if (RMX_IS_PICK(widget)) rmx_pick_button(widget);
     else if (widget == RMX_W_PITCH) rmx_set_pitch(0);
     else if (widget == RMX_W_VOLUME) {
         __atomic_store_n(&rmx_muted, !__atomic_load_n(&rmx_muted, __ATOMIC_SEQ_CST), __ATOMIC_SEQ_CST);
@@ -90,7 +95,7 @@ static void rmx_fire(unsigned int deck, unsigned int widget, unsigned int part)
 static void rmx_strip(unsigned int deck, unsigned int widget, unsigned int touching)
 {
     (void)deck;
-    if (widget < RMX_W_STRIP || widget >= RMX_W_PITCH) return;
+    if (!RMX_IS_STRIP(widget)) return;
     int section = (int)(widget - RMX_W_STRIP);
     if (!touching) {
         __atomic_store_n(&rmx_strip_touching, 0u, __ATOMIC_SEQ_CST);
@@ -133,7 +138,7 @@ static void rmx_slider_set(unsigned int deck, unsigned int widget, unsigned int 
 static uint16_t rmx_colour(unsigned int deck, unsigned int widget)
 {
     (void)deck;
-    if (widget >= RMX_W_STRIP) return 0u;
+    if (!RMX_IS_PICK(widget)) return 0u;
     unsigned int track = widget == RMX_W_PICK ? FX_XPAD_ROLL_TRACK : widget - 1u;
     if (widget != RMX_W_PICK && (rmx_xpad.shown_playing & (1u << track))) return 0x041fu;
     if (rmx_xpad.shown_tracks & (1u << track)) return 0xf800u;
@@ -159,8 +164,9 @@ static int rmx_needs_refresh(void)
 
 static const struct rx3_pad_widget rmx_widgets[RMX_WIDGETS] = {
     {RX3_PAD_TOGGLE, 2}, {RX3_PAD_TOGGLE, 2}, {RX3_PAD_TOGGLE, 2}, {RX3_PAD_TOGGLE, 2}, {RX3_PAD_TOGGLE, 2},
+    {RX3_PAD_TOGGLE_SLIDER, 3},
     {RX3_PAD_STRIP, 2}, {RX3_PAD_STRIP, 2}, {RX3_PAD_STRIP, 2}, {RX3_PAD_STRIP, 2}, {RX3_PAD_STRIP, 2},
-    {RX3_PAD_TOGGLE_SLIDER, 3}, {RX3_PAD_TOGGLE_SLIDER, 3}
+    {RX3_PAD_TOGGLE_SLIDER, 3}
 };
 
 /* Its own tab pictures, in the slots module.sh stages: the pair with KEY,
